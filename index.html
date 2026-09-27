@@ -4,12 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#101820" />
-    <meta name="description" content="A neon-soaked open-world driving game set in a hand-built coastal city." />
+    <meta name="description" content="A third-person 3D open-world drive through a neon coastal city." />
     <title>Neon Run — South Beach, 1986</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
     <main class="game-shell">
@@ -21,12 +21,12 @@
             <div class="brand-subtitle">SOUTH BEACH · 1986</div>
           </div>
         </div>
-        <div class="topbar-center"><i></i> OPEN CITY <b>///</b> STORY IN PROGRESS</div>
+        <div class="topbar-center"><i></i> THIRD PERSON <b>///</b> OPEN CITY</div>
         <button class="restart-button" id="restart" type="button" title="Start a new run"><span>↻</span> NEW RUN</button>
       </header>
 
-      <section class="game-stage" aria-label="Neon Run game">
-        <canvas id="game" aria-label="Top-down open-world driving game"></canvas>
+      <section class="game-stage" id="stage" aria-label="Neon Run 3D game">
+        <canvas id="game" aria-label="Third-person 3D open-world driving game"></canvas>
         <div class="scanlines" aria-hidden="true"></div>
 
         <section class="hud hud-left" aria-label="Player status">
@@ -58,9 +58,10 @@
         </section>
 
         <div class="bottom-hints">
-          <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> <em>MOVE / DRIVE</em></span>
+          <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> <em id="move-hint">MOVE</em></span>
           <span><kbd>E</kbd> <em>ENTER / EXIT</em></span>
           <span><kbd>SPACE</kbd> <em>HANDBRAKE</em></span>
+          <span><kbd>DRAG</kbd> <em>LOOK AROUND</em></span>
           <span><kbd>P</kbd> <em>PAUSE</em></span>
         </div>
 
@@ -71,8 +72,8 @@
           <div class="pause-stripe"></div>
         </div>
       </section>
-      <footer class="footer"><span>MADE FOR THE AFTER HOURS</span><span>WALK THE WALK. DRIVE THE NIGHT.</span><span>V 1.0 <i>◆</i></span></footer>
+      <footer class="footer"><span>MADE FOR THE AFTER HOURS</span><span>WALK THE WALK. DRIVE THE NIGHT.</span><span>V 2.0 <i>◆</i></span></footer>
     </main>
-    <script src="game.js"></script>
+    <script type="module" src="/game.js"></script>
   </body>
 </html>

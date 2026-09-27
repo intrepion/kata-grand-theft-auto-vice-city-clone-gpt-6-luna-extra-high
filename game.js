@@ -1,437 +1,756 @@
-(() => {
-  'use strict';
+import * as THREE from 'three';
 
-  const canvas = document.getElementById('game');
-  const ctx = canvas.getContext('2d');
-  const mini = document.getElementById('minimap');
-  const mctx = mini.getContext('2d');
-  const W = 2600, H = 1900, ROAD_W = 154, ROAD_H = 136;
-  const roadX = [250, 850, 1450, 2050, 2550];
-  const roadY = [210, 690, 1170, 1650];
-  const keys = new Set();
-  const rand = (min, max) => min + Math.random() * (max - min);
-  const pick = (items) => items[Math.floor(Math.random() * items.length)];
-  const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
-  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-  const colors = ['#e9b64f', '#ed697c', '#68c9bd', '#5a86b8', '#e8dbb9', '#b76a9c', '#ca684c', '#75a58c'];
+const canvas = document.querySelector('#game');
+const stage = document.querySelector('#stage');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.7));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
 
-  const buildings = [];
-  const palms = [];
-  const decorations = [];
-  const avenues = [];
-  const vehicles = [];
-  let dpr = 1, viewW = 0, viewH = 0, camX = 0, camY = 0, lastTime = 0, toastTimer = 0;
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#eea18d');
+scene.fog = new THREE.FogExp2('#eea18d', 0.0085);
+const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 230);
+const clock = new THREE.Clock();
+const ROAD = 6.8;
+const roadX = [-48, -24, 0, 24, 48];
+const roadZ = [-36, -12, 12, 36, 60];
+const world = { minX: -66, maxX: 66, minZ: -54, maxZ: 70 };
+const keys = new Set();
+const obstacles = [];
+const traffic = [];
+const police = [];
+const buildingColors = ['#edc993', '#dfaa9a', '#9bb8b1', '#c5b8ce', '#e1d0a7', '#a7c2cb', '#d8b2b3'];
+const carColors = ['#e8b849', '#df6577', '#62aaa5', '#6488b5', '#e9dfc2', '#a9729c', '#d7784b', '#649276'];
+const materialCache = new Map();
 
-  const player = { x: 330, y: 210, angle: 0, health: 100, cash: 250, vehicle: null, heat: 0, hitCooldown: 0, collisionCooldown: 0 };
-  const job = { phase: 'pickup', from: { x: 625, y: 285, name: 'Ocean Drive' }, to: { x: 2060, y: 1120, name: 'Little Havana' }, reward: 350 };
-  const cops = [];
-  let paused = false;
+const state = {
+  cash: 250, health: 100, heat: 0, paused: false, driving: null,
+  camOrbit: 0, camPitch: 0.48, camDistance: 8.6, collisionWait: 0, hitWait: 0,
+  toastTimer: 0, lastCrime: 0, elapsed: 0,
+  job: { phase: 'pickup', from: { x: -24, z: -29, name: 'Ocean Drive' }, to: { x: 24, z: 17, name: 'Little Havana' }, reward: 350 }
+};
 
-  function resize() {
-    const rect = canvas.getBoundingClientRect();
-    dpr = Math.min(window.devicePixelRatio || 1, 2);
-    viewW = rect.width; viewH = rect.height;
-    canvas.width = Math.round(viewW * dpr); canvas.height = Math.round(viewH * dpr);
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+function material(color, extra = {}) {
+  const key = `${color}:${JSON.stringify(extra)}`;
+  if (!materialCache.has(key)) materialCache.set(key, new THREE.MeshStandardMaterial({ color, roughness: 0.78, ...extra }));
+  return materialCache.get(key);
+}
+
+function box(parent, width, height, depth, color, x, y, z, options = {}) {
+  const surface = options.material?.isMaterial ? options.material : material(color, options.material || {});
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), surface);
+  mesh.position.set(x, y, z);
+  mesh.castShadow = options.cast ?? true;
+  mesh.receiveShadow = options.receive ?? true;
+  parent.add(mesh);
+  return mesh;
+}
+
+function cylinder(parent, top, bottom, height, color, x, y, z, segments = 9, options = {}) {
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(top, bottom, height, segments), material(color, options.material || {}));
+  mesh.position.set(x, y, z);
+  mesh.castShadow = options.cast ?? true;
+  mesh.receiveShadow = options.receive ?? true;
+  parent.add(mesh);
+  return mesh;
+}
+
+function flat(parent, width, depth, color, x, y, z, options = {}) {
+  return box(parent, width, options.height || 0.08, depth, color, x, y, z, options);
+}
+
+function rng(seed) {
+  let a = seed >>> 0;
+  return () => { a = (a * 1664525 + 1013904223) >>> 0; return a / 4294967296; };
+}
+
+const hemi = new THREE.HemisphereLight('#fff0d3', '#647f70', 2.05);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight('#ffe0ad', 3.1);
+sun.position.set(-32, 48, -8);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1536, 1536);
+sun.shadow.camera.left = -65;
+sun.shadow.camera.right = 65;
+sun.shadow.camera.top = 65;
+sun.shadow.camera.bottom = -65;
+sun.shadow.camera.near = 1;
+sun.shadow.camera.far = 150;
+sun.shadow.bias = -0.0003;
+scene.add(sun);
+scene.add(sun.target);
+const sunDisc = new THREE.Mesh(new THREE.SphereGeometry(5.3, 24, 16), new THREE.MeshBasicMaterial({ color: '#ffd092' }));
+sunDisc.position.set(-44, 19, -82);
+scene.add(sunDisc);
+
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(260, 240), material('#91a98a'));
+ground.rotation.x = -Math.PI / 2;
+ground.position.set(0, -0.12, 5);
+ground.receiveShadow = true;
+scene.add(ground);
+
+function addPalm(x, z, scale = 1, parent = scene) {
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  group.scale.setScalar(scale);
+  parent.add(group);
+  cylinder(group, 0.17, 0.26, 4.1, '#896847', 0, 2.05, 0, 8);
+  const crown = new THREE.Vector3(0, 4.05, 0);
+  for (let i = 0; i < 8; i++) {
+    const angle = i * Math.PI / 4 + 0.2;
+    const length = 2.55 + (i % 3) * 0.16;
+    const outward = new THREE.Vector3(Math.sin(angle), -0.27 + (i % 2) * 0.06, Math.cos(angle)).normalize();
+    const center = crown.clone().addScaledVector(outward, length * 0.5);
+    const frond = new THREE.Mesh(new THREE.ConeGeometry(0.27, length, 7), material(i % 2 ? '#3d7355' : '#4d865a'));
+    frond.position.copy(center);
+    frond.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), outward.clone().negate());
+    frond.castShadow = true;
+    group.add(frond);
   }
-  new ResizeObserver(resize).observe(canvas);
-  window.addEventListener('resize', resize);
+  return group;
+}
 
-  function isOnRoad(x, y) {
-    return roadX.some(rx => Math.abs(x - rx) < ROAD_W * .5) || roadY.some(ry => Math.abs(y - ry) < ROAD_H * .5);
+function addPark(left, right, top, bottom, seed) {
+  const width = right - left, depth = bottom - top, cx = (left + right) / 2, cz = (top + bottom) / 2;
+  flat(scene, width, depth, '#638d69', cx, 0.01, cz);
+  flat(scene, width * 0.78, 1.5, '#c6b486', cx, 0.07, cz);
+  flat(scene, 1.5, depth * 0.72, '#c6b486', cx, 0.08, cz);
+  const random = rng(seed * 31 + 9);
+  for (let i = 0; i < 9; i++) {
+    addPalm(left + 1.5 + random() * (width - 3), top + 1.5 + random() * (depth - 3), 0.73 + random() * 0.17);
   }
-  function addBuilding(x, y, w, h, hue, style = 0) {
-    const colorsByHue = [
-      ['#caa976', '#ddc99d', '#ad8964'], ['#62888b', '#83a5a1', '#4f7379'],
-      ['#b27469', '#d39983', '#8f625e'], ['#898695', '#adaab2', '#777783'],
-      ['#b4a369', '#d0bf82', '#978a5e'], ['#6c8582', '#91a396', '#596f70']
-    ];
-    const palette = colorsByHue[hue % colorsByHue.length];
-    buildings.push({ x, y, w, h, base: palette[0], roof: palette[1], shadow: palette[2], style });
-    for (let i = 0; i < 3; i++) {
-      palms.push({ x: x + rand(5, w - 5), y: y + h + rand(8, 22), size: rand(8, 13), angle: rand(0, Math.PI * 2) });
+  const bench = new THREE.Group(); bench.position.set(cx - 3, 0, cz + 2); scene.add(bench);
+  box(bench, 1.7, 0.18, 0.5, '#bd8760', 0, 0.7, 0);
+  box(bench, 1.65, 0.65, 0.14, '#9e694f', 0, 1.0, -0.18);
+  for (const x of [-0.62, 0.62]) cylinder(bench, 0.06, 0.07, 0.7, '#364545', x, 0.35, 0, 7);
+}
+
+function makeSignTexture(title, subtitle, color = '#ff5b8c') {
+  const sign = document.createElement('canvas'); sign.width = 512; sign.height = 128;
+  const g = sign.getContext('2d');
+  g.fillStyle = '#17262d'; g.fillRect(0, 0, sign.width, sign.height);
+  g.strokeStyle = color; g.lineWidth = 9; g.strokeRect(6, 6, sign.width - 12, sign.height - 12);
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  g.font = '900 48px Outfit, sans-serif'; g.fillStyle = '#fff1d3'; g.fillText(title, 256, 55);
+  g.font = '500 19px "DM Mono", monospace'; g.fillStyle = color; g.fillText(subtitle, 256, 98);
+  const texture = new THREE.CanvasTexture(sign);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function addBuilding(x, z, width, depth, height, color, style, seed) {
+  const group = new THREE.Group();
+  group.position.set(x, 0, z);
+  scene.add(group);
+  box(group, width + 0.28, 0.3, depth + 0.28, '#c1ad88', 0, 0.16, 0);
+  box(group, width, height, depth, color, 0, height / 2 + 0.32, 0);
+  box(group, width + 0.12, 0.27, depth + 0.12, style === 1 ? '#fbdec0' : '#d8c39a', 0, height + 0.34, 0);
+  box(group, width * 0.72, 0.09, depth * 0.72, style === 2 ? '#7b9b98' : '#8b8877', 0, height + 0.53, 0);
+
+  // Flat rooftop air-conditioning units, parapets, and water tanks add depth at street level.
+  if (height > 8) {
+    for (let i = 0; i < 2 + (seed % 2); i++) {
+      box(group, 1.05, 0.65, 0.78, '#89908a', -width * 0.22 + i * 1.3, height + 0.91, -depth * 0.12);
+      box(group, 1.12, 0.08, 0.84, '#c2c1ad', -width * 0.22 + i * 1.3, height + 1.27, -depth * 0.12);
+    }
+  }
+  if (seed % 4 === 0) {
+    cylinder(group, 0.56, 0.72, 1.9, '#c49a74', width * 0.28, height + 1.34, -depth * 0.23, 10);
+  }
+
+  const glass = material(style === 0 ? '#527b82' : style === 1 ? '#557779' : '#637d82', { roughness: 0.34, metalness: 0.12, emissive: '#29424a', emissiveIntensity: 0.12 });
+  const warmGlass = material('#dfbb80', { roughness: 0.38, emissive: '#bd7e48', emissiveIntensity: 0.11 });
+  const floors = Math.max(1, Math.floor((height - 1.8) / 2.2));
+  const bays = Math.max(2, Math.floor((width - 1.3) / 1.7));
+  for (let floor = 0; floor < floors; floor++) {
+    const wy = 1.12 + floor * 2.15;
+    for (let bay = 0; bay < bays; bay++) {
+      const wx = -width / 2 + 0.92 + bay * ((width - 1.5) / Math.max(1, bays - 1));
+      const paneMat = (bay + floor + seed) % 5 === 0 ? warmGlass : glass;
+      box(group, 0.74, 0.82, 0.075, paneMat.color, wx, wy, depth / 2 + 0.065, { cast: false, material: paneMat });
     }
   }
 
-  function buildCity() {
-    // The city grid creates broad boulevards, small service lanes and pocket parks.
-    for (let i = 0; i < roadX.length - 1; i++) {
-      avenues.push({ x1: roadX[i] + ROAD_W / 2, x2: roadX[i + 1] - ROAD_W / 2, kind: 'block' });
-    }
-    for (let row = 0; row < roadY.length - 1; row++) {
-      for (let col = 0; col < roadX.length - 1; col++) {
-        const left = roadX[col] + ROAD_W / 2 + 13;
-        const right = roadX[col + 1] - ROAD_W / 2 - 13;
-        const top = roadY[row] + ROAD_H / 2 + 13;
-        const bottom = roadY[row + 1] - ROAD_H / 2 - 13;
-        const bw = right - left, bh = bottom - top;
-        const seed = row * 7 + col * 3;
-        if ((row === 1 && col === 2) || (row === 2 && col === 0)) {
-          decorations.push({ x: left, y: top, w: bw, h: bh, kind: 'park' });
-          continue;
-        }
-        if (seed % 4 === 0) {
-          addBuilding(left + 16, top + 15, bw - 32, bh - 30, seed, 1);
-        } else {
-          const gap = 16;
-          const split = bw * (seed % 2 ? .56 : .45);
-          addBuilding(left + 9, top + 18, split - gap, bh * .58, seed + 1, seed % 3);
-          addBuilding(left + split + 2, top + 11, bw - split - 11, bh * .43, seed + 2, (seed + 1) % 3);
-          addBuilding(left + split + 4, top + bh * .56, bw - split - 14, bh * .36, seed + 3, (seed + 2) % 3);
-        }
+  if (depth > 7) {
+    for (let floor = 0; floor < Math.min(4, floors); floor++) {
+      const wy = 1.2 + floor * 2.12;
+      for (const side of [-1, 1]) {
+        box(group, 0.065, 0.96, 0.88, '#527b82', side * (width / 2 + 0.04), wy, -depth * 0.22 + floor * 0.02, { cast: false });
       }
     }
-    for (let i = 0; i < 15; i++) {
-      const x = 80 + (i % 5) * 590 + rand(-60, 60);
-      const y = 75 + Math.floor(i / 5) * 640 + rand(-40, 40);
-      if (!isOnRoad(x, y)) decorations.push({ x, y, w: 130, h: 70, kind: 'pool' });
-    }
-    // Parked rides and moving traffic share the street grid.
-    for (let i = 0; i < 14; i++) {
-      const vertical = i % 2 === 0;
-      const lane = pick(vertical ? roadX : roadY);
-      const position = vertical ? rand(120, H - 100) : rand(120, W - 100);
-      const side = i % 4 < 2 ? -1 : 1;
-      vehicles.push({ x: vertical ? lane + side * 42 : position, y: vertical ? position : lane + side * 37,
-        angle: vertical ? Math.PI / 2 : 0, color: pick(colors), speed: 0, parked: true, type: 'civilian', length: 47, width: 23 });
-    }
-    for (let i = 0; i < 20; i++) {
-      const vertical = i % 2 === 0;
-      const lane = pick(vertical ? roadX : roadY);
-      const position = vertical ? rand(100, H - 100) : rand(100, W - 100);
-      const direction = i % 4 < 2 ? 1 : -1;
-      vehicles.push({ x: vertical ? lane + direction * 13 : position, y: vertical ? position : lane + direction * 13,
-        angle: vertical ? (direction > 0 ? Math.PI / 2 : -Math.PI / 2) : (direction > 0 ? 0 : Math.PI),
-        color: pick(colors), speed: rand(45, 85), parked: false, type: 'civilian', length: 45, width: 22 });
-    }
-  }
-  buildCity();
-  vehicles.push({ x: 300, y: 252, angle: 0, color: '#e9b64f', speed: 0, parked: true, type: 'civilian', length: 47, width: 23 });
-
-  function rectHit(x, y, radius = 0) {
-    if (x < 103) return true;
-    return buildings.some(b => {
-      const nx = clamp(x, b.x, b.x + b.w), ny = clamp(y, b.y, b.y + b.h);
-      return Math.hypot(x - nx, y - ny) < radius;
-    });
   }
 
-  function roundRect(c, x, y, w, h, r) {
-    c.beginPath(); c.roundRect(x, y, w, h, r);
+  // Ground-floor storefront and optional illuminated hotel/club sign.
+  box(group, width * 0.76, 1.22, 0.12, '#f4d7a6', 0, 0.98, depth / 2 + 0.09, { cast: false });
+  box(group, width * 0.64, 0.76, 0.17, '#467982', 0, 0.88, depth / 2 + 0.17, { cast: false, material: glass });
+  if (seed % 3 === 0 || seed % 5 === 0) {
+    const title = seed % 5 === 0 ? 'OCEAN HOTEL' : seed % 2 === 0 ? 'PALM CLUB' : 'HOTEL AZUL';
+    const signMat = new THREE.MeshBasicMaterial({ map: makeSignTexture(title, 'COCKTAILS · MUSIC · 1986'), toneMapped: false });
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(Math.min(width - 0.6, 7.5), 1.72), signMat);
+    sign.position.set(0, Math.min(height - 0.35, 4.4), depth / 2 + 0.22);
+    group.add(sign);
+    const glow = new THREE.PointLight('#ff5b89', 4.2, 10, 2);
+    glow.position.set(0, Math.min(height - 0.6, 4.3), depth / 2 + 0.8);
+    group.add(glow);
   }
+  obstacles.push({ x: x - width / 2 - 0.35, z: z - depth / 2 - 0.35, w: width + 0.7, d: depth + 0.7 });
+  return group;
+}
 
-  function drawPalm(x, y, size, rotation = 0) {
-    ctx.fillStyle = '#0003'; ctx.beginPath(); ctx.ellipse(x + size * .55, y + size * .3, size * .92, size * .42, -.35, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#795c3d'; ctx.lineWidth = Math.max(2, size * .16); ctx.beginPath(); ctx.moveTo(x, y + size * .25); ctx.lineTo(x + 2, y - size * .2); ctx.stroke();
-    for (let i = 0; i < 7; i++) {
-      const a = rotation + i * Math.PI * 2 / 7;
-      ctx.strokeStyle = i % 2 ? '#365d4b' : '#47735a'; ctx.lineWidth = Math.max(1.5, size * .13); ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(x + 2, y - size * .2); ctx.quadraticCurveTo(x + Math.cos(a) * size * .42, y - size * .2 + Math.sin(a) * size * .25, x + Math.cos(a) * size, y - size * .2 + Math.sin(a) * size * .61); ctx.stroke();
+function addPool(x, z, width = 6.5, depth = 4.1) {
+  flat(scene, width + 1.2, depth + 1.2, '#d8c29a', x, 0.03, z);
+  flat(scene, width, depth, '#42b8b3', x, 0.08, z);
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(width - 0.5, depth - 0.5), new THREE.MeshStandardMaterial({ color: '#74d4c8', roughness: 0.18, metalness: 0.12, transparent: true, opacity: 0.86 }));
+  water.rotation.x = -Math.PI / 2; water.position.set(x, 0.16, z); scene.add(water);
+  flat(scene, width * 0.6, 0.09, '#deefe0', x, 0.19, z + 0.2, { height: 0.025, cast: false, receive: false });
+}
+
+function makeStreetLamp(x, z, rotation = 0) {
+  const group = new THREE.Group(); group.position.set(x, 0, z); group.rotation.y = rotation; scene.add(group);
+  cylinder(group, 0.09, 0.14, 4.5, '#38464b', 0, 2.25, 0, 8);
+  cylinder(group, 0.055, 0.075, 1.35, '#38464b', 0.39, 4.36, 0, 8).rotation.z = Math.PI / 2;
+  box(group, 0.62, 0.16, 0.36, '#344247', 1.0, 4.3, 0);
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.19, 8, 6), new THREE.MeshBasicMaterial({ color: '#ffd28c' }));
+  lamp.position.set(1.0, 4.16, 0); group.add(lamp);
+}
+
+function addUmbrella(x, z, color) {
+  cylinder(scene, 0.025, 0.035, 1.8, '#a38b68', x, 0.9, z, 6, { cast: false });
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(1.1, 0.58, 10), material(color));
+  cap.position.set(x, 1.95, z);
+  cap.castShadow = true; scene.add(cap);
+  cylinder(scene, 0.14, 0.2, 0.36, '#e4d4b0', x, 0.2, z, 8, { cast: false });
+}
+
+function buildWorld() {
+  // Atlantic, sand, and a low seawall on the west edge.
+  flat(scene, 56, 210, '#258b91', -94, -0.04, 4, { height: 0.1, receive: false });
+  flat(scene, 10, 210, '#d7c08f', -61, 0.0, 4, { height: 0.14 });
+  flat(scene, 0.48, 210, '#ebe0ba', -55.7, 0.23, 4, { height: 0.48 });
+  flat(scene, 1.5, 210, '#b49c76', -54.7, 0.13, 4, { height: 0.26 });
+  for (let i = 0; i < 39; i++) {
+    const z = -96 + i * 5;
+    const ripple = box(scene, 0.045, 0.015, 1.1 + (i % 3) * 0.35, i % 2 ? '#58b1a6' : '#75c1af', -102 + (i % 7) * 2.6, 0.04, z, { cast: false, receive: false, material: { transparent: true, opacity: 0.46 } });
+    ripple.userData.baseX = ripple.position.x;
+    ripple.userData.phase = i * 0.78;
+    ripple.name = 'ocean-ripple';
+  }
+  for (let z = -48; z <= 66; z += 14) addPalm(-58.5, z, 0.92);
+  for (let z = -45; z <= 61; z += 11) addUmbrella(-63.7 + (z % 3) * 0.55, z, ['#f6d779', '#ff6b93', '#75c9bd'][Math.abs(z / 11) % 3 | 0]);
+
+  // Broad asphalt boulevards, pale sidewalks, medians, and painted crossings.
+  for (const x of roadX) {
+    flat(scene, ROAD, 170, '#555d5e', x, 0.02, 6, { height: 0.12 });
+    for (const side of [-1, 1]) {
+      flat(scene, 1.45, 170, '#c4b38e', x + side * 4.05, 0.04, 6, { height: 0.18 });
+      flat(scene, 0.13, 170, '#8e9085', x + side * 3.24, 0.12, 6, { height: 0.06, cast: false });
+    }
+    for (let z = -78; z <= 86; z += 4.5) flat(scene, 0.13, 1.85, '#d5bd7d', x, 0.1, z, { height: 0.035, cast: false, receive: false });
+    for (let z = -56; z <= 70; z += 22) {
+      makeStreetLamp(x - 4.9, z, 0);
+      makeStreetLamp(x + 4.9, z + 10, Math.PI);
+    }
+  }
+  for (const z of roadZ) {
+    flat(scene, 160, ROAD, '#555d5e', 0, 0.03, z, { height: 0.13 });
+    for (const side of [-1, 1]) {
+      flat(scene, 160, 1.45, '#c4b38e', 0, 0.05, z + side * 4.0, { height: 0.18 });
+      flat(scene, 160, 0.13, '#8e9085', 0, 0.12, z + side * 3.2, { height: 0.06, cast: false });
+    }
+    for (let x = -72; x <= 72; x += 4.5) flat(scene, 1.85, 0.13, '#d5bd7d', x, 0.1, z, { height: 0.035, cast: false, receive: false });
+  }
+  for (const x of roadX) for (const z of roadZ) {
+    for (let i = -3; i <= 3; i++) {
+      flat(scene, 0.34, 2.3, '#eee5ce', x - ROAD / 2 + 0.8 + i * 0.78, 0.11, z - ROAD / 2 - 0.5, { height: 0.04, cast: false });
+      flat(scene, 2.3, 0.34, '#eee5ce', x + ROAD / 2 + 0.5, 0.11, z - ROAD / 2 + 0.8 + i * 0.78, { height: 0.04, cast: false });
     }
   }
 
-  function drawCity() {
-    ctx.fillStyle = '#88a88e'; ctx.fillRect(0, 0, W, H);
-    // Soft checker of lawns and sandy vacant lots gives the neighborhoods a sun-bleached texture.
-    for (let x = 0; x < W; x += 96) for (let y = 0; y < H; y += 96) {
-      ctx.fillStyle = ((x / 96 + y / 96) % 2) ? '#88a98e' : '#8dad91'; ctx.fillRect(x, y, 96, 96);
-    }
-    for (const d of decorations) {
-      if (d.kind === 'park') {
-        ctx.fillStyle = '#618870'; ctx.fillRect(d.x, d.y, d.w, d.h);
-        ctx.strokeStyle = '#c9bd91'; ctx.lineWidth = 11; ctx.beginPath(); ctx.moveTo(d.x + 18, d.y + d.h - 25); ctx.lineTo(d.x + d.w - 20, d.y + 20); ctx.stroke();
-        for (let i = 0; i < 16; i++) drawPalm(d.x + rand(20, d.w - 20), d.y + rand(20, d.h - 20), rand(8, 14), i * .3);
-      } else if (d.kind === 'pool') {
-        ctx.fillStyle = '#d2c097'; ctx.fillRect(d.x, d.y, d.w, d.h);
-        ctx.fillStyle = '#61bdb7'; ctx.fillRect(d.x + 7, d.y + 7, d.w - 14, d.h - 14);
-        ctx.fillStyle = '#b5ded0'; ctx.fillRect(d.x + 12, d.y + 12, d.w - 26, 2);
+  // Each city block gets a distinct low-rise/promenade footprint with parks and pools.
+  for (let row = 0; row < roadZ.length - 1; row++) {
+    for (let col = 0; col < roadX.length - 1; col++) {
+      const left = roadX[col] + 4.85, right = roadX[col + 1] - 4.85;
+      const top = roadZ[row] + 4.85, bottom = roadZ[row + 1] - 4.85;
+      const width = right - left, depth = bottom - top, cx = (left + right) / 2, cz = (top + bottom) / 2;
+      const seed = row * 9 + col * 5 + 1;
+      if ((row === 1 && col === 2) || (row === 2 && col === 0)) {
+        addPark(left, right, top, bottom, seed);
+        continue;
       }
-    }
-    // A narrow Atlantic edge and a long strip of sand make the coastal grid legible.
-    const sea = ctx.createLinearGradient(0, 0, 115, 0);
-    sea.addColorStop(0, '#397f85'); sea.addColorStop(.62, '#56aaa0'); sea.addColorStop(1, '#83bd9c');
-    ctx.fillStyle = sea; ctx.fillRect(0, 0, 110, H);
-    ctx.fillStyle = '#d6c291'; ctx.fillRect(110, 0, 62, H);
-    ctx.fillStyle = '#e4d5aa'; ctx.fillRect(110, 0, 5, H);
-    ctx.strokeStyle = '#d6e3bb88'; ctx.lineWidth = 2;
-    for (let y = 12; y < H; y += 44) {
-      ctx.beginPath(); ctx.moveTo(12 + (y % 3) * 4, y); ctx.quadraticCurveTo(43, y - 4, 75, y + 1); ctx.stroke();
-    }
-    // Alleys and sidewalks under the buildings.
-    for (const b of buildings) {
-      ctx.fillStyle = '#c8b995'; ctx.fillRect(b.x - 6, b.y - 6, b.w + 12, b.h + 12);
-      ctx.fillStyle = '#0003'; ctx.fillRect(b.x + 10, b.y + 12, b.w, b.h);
-      ctx.fillStyle = b.base; ctx.fillRect(b.x, b.y, b.w, b.h);
-      ctx.fillStyle = b.roof; ctx.fillRect(b.x + 3, b.y + 3, b.w - 6, b.h - 6);
-      ctx.strokeStyle = '#f2e3bd88'; ctx.lineWidth = 2; ctx.strokeRect(b.x + 7, b.y + 7, b.w - 14, b.h - 14);
-      if (b.style === 1) {
-        ctx.fillStyle = '#c3a171'; ctx.fillRect(b.x + b.w * .32, b.y + 6, b.w * .37, b.h - 12);
-        ctx.fillStyle = '#6b8d88'; ctx.fillRect(b.x + b.w * .39, b.y + 12, b.w * .22, b.h * .28);
-      } else {
-        ctx.fillStyle = '#607f82'; ctx.fillRect(b.x + b.w * .14, b.y + b.h * .15, b.w * .29, b.h * .17);
-        ctx.fillStyle = '#e4d09f'; ctx.fillRect(b.x + b.w * .57, b.y + b.h * .17, b.w * .25, 4);
-        ctx.fillRect(b.x + b.w * .57, b.y + b.h * .26, b.w * .25, 4);
-        if (b.w > 155) { ctx.fillStyle = '#7eaaa0'; ctx.fillRect(b.x + b.w * .2, b.y + b.h * .58, b.w * .58, b.h * .18); }
-      }
-      ctx.fillStyle = '#0002'; ctx.fillRect(b.x + 8, b.y + b.h - 7, b.w - 16, 2);
-    }
-    // The road ribbons are painted over block edges to form clean intersections.
-    ctx.fillStyle = '#5b6261';
-    for (const x of roadX) ctx.fillRect(x - ROAD_W / 2, 0, ROAD_W, H);
-    for (const y of roadY) ctx.fillRect(0, y - ROAD_H / 2, W, ROAD_H);
-    for (const x of roadX) {
-      ctx.fillStyle = '#b5aa88'; ctx.fillRect(x - ROAD_W / 2, 0, 9, H); ctx.fillRect(x + ROAD_W / 2 - 9, 0, 9, H);
-      ctx.fillStyle = '#777a70'; ctx.fillRect(x - ROAD_W / 2 + 9, 0, 3, H); ctx.fillRect(x + ROAD_W / 2 - 12, 0, 3, H);
-      ctx.strokeStyle = '#c8bb80'; ctx.lineWidth = 2; ctx.setLineDash([17, 17]); ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); ctx.setLineDash([]);
-      ctx.strokeStyle = '#9b9a84'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x - 26, 0); ctx.lineTo(x - 26, H); ctx.moveTo(x + 26, 0); ctx.lineTo(x + 26, H); ctx.stroke();
-    }
-    for (const y of roadY) {
-      ctx.fillStyle = '#b5aa88'; ctx.fillRect(0, y - ROAD_H / 2, W, 8); ctx.fillRect(0, y + ROAD_H / 2 - 8, W, 8);
-      ctx.fillStyle = '#777a70'; ctx.fillRect(0, y - ROAD_H / 2 + 8, W, 3); ctx.fillRect(0, y + ROAD_H / 2 - 11, W, 3);
-      ctx.strokeStyle = '#c8bb80'; ctx.lineWidth = 2; ctx.setLineDash([17, 17]); ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); ctx.setLineDash([]);
-      ctx.strokeStyle = '#9b9a84'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, y - 24); ctx.lineTo(W, y - 24); ctx.moveTo(0, y + 24); ctx.lineTo(W, y + 24); ctx.stroke();
-    }
-    // Crosswalks at the busier corners.
-    ctx.fillStyle = '#ddd6bd88';
-    for (const x of roadX) for (const y of roadY) {
-      for (let i = -4; i <= 4; i++) {
-        ctx.fillRect(x - ROAD_W / 2 + 17 + i * 12, y - ROAD_H / 2 + 5, 7, 24);
-        ctx.fillRect(x + ROAD_W / 2 - 26, y - ROAD_H / 2 + 16 + i * 12, 24, 7);
-      }
-    }
-    for (const p of palms) drawPalm(p.x, p.y, p.size, p.angle);
-    // Tiny pastel road-name plates lend the blocks a lived-in map feel.
-    ctx.font = '8px "DM Mono", monospace'; ctx.textAlign = 'center';
-    for (const x of roadX) for (const y of roadY) {
-      ctx.fillStyle = '#e6dfc8'; ctx.fillRect(x - 60, y - 57, 48, 11);
-      ctx.fillStyle = '#414b48'; ctx.fillText(x < 700 ? 'OCEAN DR' : x < 1700 ? 'COLLINS AVE' : 'BISCAYNE', x - 36, y - 49);
+      if ((row + col) % 5 === 0) addPool(cx + width * 0.19, cz - depth * 0.16, 4.5, 3.2);
+      const random = rng(seed * 8731);
+      const firstWidth = 6.15 + random() * 1.2;
+      const secondWidth = 6.05 + random() * 1.2;
+      const firstDepth = 6.3 + random() * 1.7;
+      const secondDepth = 6.0 + random() * 1.6;
+      const h1 = 5.1 + random() * 9.2;
+      const h2 = 4.6 + random() * 6.7;
+      addBuilding(cx - width * 0.24, cz + depth * 0.13, firstWidth, firstDepth, h1, buildingColors[seed % buildingColors.length], seed % 3, seed);
+      addBuilding(cx + width * 0.24, cz - depth * 0.12, secondWidth, secondDepth, h2, buildingColors[(seed + 2) % buildingColors.length], (seed + 1) % 3, seed + 2);
+      if (seed % 3 === 1) addPalm(cx + width * 0.43, cz + depth * 0.4, 0.76);
     }
   }
+}
 
-  function drawVehicle(v) {
-    ctx.save(); ctx.translate(v.x, v.y); ctx.rotate(v.angle);
-    ctx.fillStyle = '#17212044'; roundRect(ctx, -v.length * .48 + 3, -v.width * .5 + 5, v.length, v.width, 6); ctx.fill();
-    // Tires
-    ctx.fillStyle = '#202725';
-    ctx.fillRect(-v.length * .28, -v.width * .5 - 2, 10, 4); ctx.fillRect(v.length * .2, -v.width * .5 - 2, 10, 4);
-    ctx.fillRect(-v.length * .28, v.width * .5 - 2, 10, 4); ctx.fillRect(v.length * .2, v.width * .5 - 2, 10, 4);
-    const body = v.type === 'police' ? '#e9e7d7' : v.color;
-    ctx.fillStyle = body; roundRect(ctx, -v.length / 2, -v.width / 2, v.length, v.width, 6); ctx.fill();
-    ctx.fillStyle = v.type === 'police' ? '#526976' : '#273d48'; roundRect(ctx, -7, -v.width / 2 + 3, 17, v.width - 6, 4); ctx.fill();
-    ctx.fillStyle = '#a7d5cc'; ctx.fillRect(-4, -v.width / 2 + 4, 7, v.width - 8);
-    ctx.fillStyle = '#ffe6a3'; ctx.fillRect(v.length / 2 - 4, -v.width / 2 + 3, 3, 5); ctx.fillRect(v.length / 2 - 4, v.width / 2 - 8, 3, 5);
-    ctx.fillStyle = '#e85d65'; ctx.fillRect(-v.length / 2 + 1, -v.width / 2 + 3, 3, 5); ctx.fillRect(-v.length / 2 + 1, v.width / 2 - 8, 3, 5);
-    if (v.type === 'police') {
-      const flash = Math.sin(performance.now() / 80) > 0;
-      ctx.fillStyle = flash ? '#e74255' : '#4f9df0'; ctx.fillRect(-4, -v.width / 2 - 2, 5, 3);
-      ctx.fillStyle = flash ? '#4f9df0' : '#e74255'; ctx.fillRect(1, -v.width / 2 - 2, 5, 3);
-    }
-    ctx.restore();
-  }
+buildWorld();
 
-  function drawPerson() {
-    ctx.save(); ctx.translate(player.x, player.y); ctx.rotate(player.angle);
-    ctx.fillStyle = '#12201f55'; ctx.beginPath(); ctx.ellipse(2, 8, 10, 5, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#f0bd86'; ctx.beginPath(); ctx.arc(0, -5, 4, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#fff0d5'; roundRect(ctx, -5, -2, 10, 12, 3); ctx.fill();
-    ctx.fillStyle = '#ec6583'; ctx.fillRect(-5, 1, 10, 5);
-    ctx.strokeStyle = '#293239'; ctx.lineWidth = 2.5; ctx.lineCap = 'round';
-    ctx.beginPath(); ctx.moveTo(-3, 9); ctx.lineTo(-4, 14); ctx.moveTo(3, 9); ctx.lineTo(4, 14); ctx.stroke();
-    ctx.restore();
+function makePerson() {
+  const root = new THREE.Group();
+  const shirt = material('#e9f0db', { roughness: 0.9 });
+  const pants = material('#35516b', { roughness: 0.92 });
+  const skin = material('#d8a17c', { roughness: 0.85 });
+  const hair = material('#33272c', { roughness: 0.9 });
+  const shoes = material('#262f35');
+  box(root, 0.78, 1.05, 0.47, '#e9f0db', 0, 1.52, 0);
+  box(root, 0.78, 0.46, 0.49, '#e65f83', 0, 1.32, 0.02);
+  box(root, 0.66, 0.14, 0.51, '#f1d9a9', 0, 1.03, 0);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.31, 14, 12), skin); head.position.set(0, 2.29, 0.02); root.add(head);
+  const hairCap = new THREE.Mesh(new THREE.SphereGeometry(0.315, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.56), hair); hairCap.position.set(0, 2.39, -0.015); root.add(hairCap);
+  box(root, 0.12, 0.18, 0.11, '#f0c27f', 0, 2.31, 0.29, { cast: false });
+  const leftArm = new THREE.Group(); leftArm.position.set(-0.51, 1.9, 0); root.add(leftArm);
+  box(leftArm, 0.23, 0.86, 0.25, '#f1eee0', 0, -0.39, 0);
+  const rightArm = new THREE.Group(); rightArm.position.set(0.51, 1.9, 0); root.add(rightArm);
+  box(rightArm, 0.23, 0.86, 0.25, '#f1eee0', 0, -0.39, 0);
+  const legs = [];
+  for (const side of [-1, 1]) {
+    const leg = new THREE.Group(); leg.position.set(side * 0.2, 1.03, 0); root.add(leg);
+    box(leg, 0.29, 0.91, 0.35, '#35516b', 0, -0.39, 0);
+    box(leg, 0.31, 0.18, 0.5, '#262f35', 0, -0.83, 0.075);
+    legs.push(leg);
   }
+  root.userData.limbs = { leftArm, rightArm, legs };
+  root.traverse(object => { if (object.isMesh) { object.castShadow = true; object.receiveShadow = true; } });
+  scene.add(root);
+  return root;
+}
 
-  function drawMarker(point, color, label, t) {
-    const pulse = 1 + Math.sin(t * 4) * .13;
-    ctx.save(); ctx.translate(point.x, point.y);
-    ctx.globalAlpha = .24; ctx.fillStyle = color; ctx.beginPath(); ctx.arc(0, 0, 30 * pulse, 0, Math.PI * 2); ctx.fill();
-    ctx.globalAlpha = 1; ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(0, 0, 18 * pulse, 0, Math.PI * 2); ctx.stroke();
-    ctx.fillStyle = color; ctx.beginPath(); ctx.arc(0, 0, 5, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#172024'; ctx.font = 'bold 9px "DM Mono", monospace'; ctx.textAlign = 'center'; ctx.fillText(label, 0, -25 * pulse);
-    ctx.restore();
-  }
-
-  function draw(t) {
-    ctx.clearRect(0, 0, viewW, viewH);
-    const focus = player.vehicle || player;
-    camX = clamp(focus.x - viewW / 2, 0, W - viewW);
-    camY = clamp(focus.y - viewH / 2, 0, H - viewH);
-    ctx.save(); ctx.translate(-camX, -camY);
-    drawCity();
-    for (const v of vehicles) if (!v.parked || dist(v, focus) < Math.max(viewW, viewH)) drawVehicle(v);
-    for (const cop of cops) drawVehicle(cop);
-    drawMarker(job.phase === 'pickup' ? job.from : job.to, '#ff5e91', job.phase === 'pickup' ? 'PICKUP' : 'DROP', t);
-    if (!player.vehicle) drawPerson();
-    // A warm coastal haze softens the edge of the camera frame.
-    const vignette = ctx.createRadialGradient(focus.x, focus.y, 120, focus.x, focus.y, Math.max(viewW, viewH) * .67);
-    vignette.addColorStop(0, '#fff4d000'); vignette.addColorStop(1, '#16212547'); ctx.fillStyle = vignette;
-    ctx.fillRect(camX, camY, viewW, viewH);
-    ctx.restore();
-    drawMinimap();
-  }
-
-  function drawMinimap() {
-    const mw = mini.width, mh = mini.height;
-    mctx.clearRect(0, 0, mw, mh); mctx.fillStyle = '#34544e'; mctx.fillRect(0, 0, mw, mh);
-    for (let i = 0; i < 50; i++) {
-      const x = (i * 67 + 23) % mw, y = (i * 41 + 11) % mh;
-      mctx.fillStyle = i % 3 ? '#527360' : '#806f52'; mctx.fillRect(x, y, 6, 4);
-    }
-    mctx.fillStyle = '#79807a';
-    for (const x of roadX) mctx.fillRect(x / W * mw - ROAD_W / W * mw / 2, 0, ROAD_W / W * mw, mh);
-    for (const y of roadY) mctx.fillRect(0, y / H * mh - ROAD_H / H * mh / 2, mw, ROAD_H / H * mh);
-    const target = job.phase === 'pickup' ? job.from : job.to;
-    mctx.fillStyle = '#ff5e91'; mctx.beginPath(); mctx.arc(target.x / W * mw, target.y / H * mh, 3, 0, Math.PI * 2); mctx.fill();
-    for (const cop of cops) { mctx.fillStyle = '#68aaf4'; mctx.fillRect(cop.x / W * mw - 1, cop.y / H * mh - 1, 3, 3); }
-    const focus = player.vehicle || player;
-    mctx.fillStyle = '#64f2d9'; mctx.beginPath(); mctx.arc(focus.x / W * mw, focus.y / H * mh, 3.2, 0, Math.PI * 2); mctx.fill();
-    mctx.strokeStyle = '#d9fff2'; mctx.lineWidth = 1; mctx.stroke();
-  }
-
-  function announce(message) {
-    const el = document.getElementById('toast'); el.textContent = message; el.classList.add('show');
-    clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2300);
-  }
-
-  function updateHUD() {
-    document.getElementById('cash').textContent = player.cash.toLocaleString('en-US');
-    const stars = document.getElementById('stars');
-    const count = Math.ceil(player.heat);
-    stars.innerHTML = Array.from({ length: 5 }, (_, i) => `<span class="${i < count ? 'lit' : ''}">${i < count ? '★' : '☆'}</span>`).join(' ');
-    stars.setAttribute('aria-label', `${count} wanted stars`);
-    document.getElementById('health-fill').style.width = `${player.health}%`;
-    document.getElementById('health-value').textContent = Math.round(player.health);
-    const target = job.phase === 'pickup' ? job.from : job.to;
-    document.getElementById('mission-phase').textContent = job.phase === 'pickup' ? 'SIDE HUSTLE 01' : 'SIDE HUSTLE 01 / DELIVERY';
-    document.getElementById('mission-title').textContent = job.phase === 'pickup' ? 'A little delivery' : 'Take it to the club';
-    document.getElementById('mission-copy').textContent = job.phase === 'pickup' ? 'Collect the envelope at Ocean Drive. Drop it off before the sun goes down.' : 'The package is yours. Get it to the club in Little Havana and keep a low profile.';
-    document.getElementById('mission-distance').textContent = `${Math.round(dist(player, target))} M TO ${job.phase === 'pickup' ? 'PICKUP' : 'DROP'}`;
-    document.getElementById('mission-reward').textContent = `+$${job.reward}`;
-    document.getElementById('mission-card').querySelector('.mission-live').textContent = job.phase === 'pickup' ? 'AVAILABLE' : 'IN PROGRESS';
-    document.getElementById('district').textContent = player.x < 800 ? 'OCEAN DRIVE' : player.x < 1500 ? 'ARTS DISTRICT' : player.y > 1050 ? 'LITTLE HAVANA' : 'VICE POINT';
-    const speed = player.vehicle ? Math.round(Math.abs(player.vehicle.speed) * .30) : 0;
-    document.getElementById('speed').textContent = String(speed).padStart(2, '0');
-    document.getElementById('needle').style.transform = `rotate(${-130 + Math.min(speed / 140, 1) * 260}deg)`;
-    document.getElementById('vehicle-mode').textContent = player.vehicle ? 'COUPE' : 'ON FOOT';
-    document.getElementById('gear').textContent = player.vehicle ? (player.vehicle.speed < -5 ? 'REV' : speed > 0 ? 'DRIVE' : 'IDLE') : 'WALK';
-  }
-
-  function tryEnterExit() {
-    if (player.vehicle) {
-      const v = player.vehicle;
-      const side = v.angle + Math.PI / 2;
-      const x = v.x + Math.cos(side) * 34, y = v.y + Math.sin(side) * 34;
-      if (!rectHit(x, y, 12)) { player.x = x; player.y = y; }
-      else { player.x = v.x - Math.cos(side) * 34; player.y = v.y - Math.sin(side) * 34; }
-      player.angle = v.angle; player.vehicle = null; announce('OUT ON THE STREET. KEEP MOVING.');
-    } else {
-      let nearest = null, best = 62;
-      for (const v of vehicles) { const d = dist(player, v); if (d < best) { nearest = v; best = d; } }
-      if (nearest) { nearest.parked = false; player.vehicle = nearest; player.x = nearest.x; player.y = nearest.y; announce('NICE RIDE. MAKE IT COUNT.'); }
-      else announce('NO RIDE CLOSE ENOUGH. WALK A LITTLE.');
+function makeCar(color = '#e8b849', type = 'civilian') {
+  const root = new THREE.Group();
+  const paint = material(type === 'police' ? '#ebe7d6' : color, { roughness: 0.43, metalness: 0.22 });
+  const glass = material('#466875', { roughness: 0.24, metalness: 0.25 });
+  const rubber = material('#20272a', { roughness: 0.95 });
+  const chrome = material('#c6c7b8', { metalness: 0.72, roughness: 0.3 });
+  const frontLamp = new THREE.MeshBasicMaterial({ color: '#ffe1a2' });
+  box(root, 1.9, 0.55, 3.7, paint, 0, 0.72, 0);
+  box(root, 1.63, 0.24, 1.0, paint, 0, 1.09, 1.22);
+  box(root, 1.37, 0.73, 1.65, type === 'police' ? '#f2efe4' : color, 0, 1.22, -0.04);
+  box(root, 1.2, 0.58, 1.42, glass, 0, 1.32, -0.05, { cast: false });
+  box(root, 1.8, 0.1, 0.35, paint, 0, 0.95, -1.62);
+  box(root, 1.8, 0.1, 0.36, paint, 0, 0.95, 1.62);
+  for (const x of [-0.57, 0.57]) {
+    for (const z of [-1.08, 1.12]) {
+      const window = box(root, 0.06, 0.43, 0.54, glass, x, 1.29, z, { cast: false });
+      if (x < 0) window.position.x = -0.69; else window.position.x = 0.69;
     }
   }
-
-  function spawnCop() {
-    if (cops.length >= Math.ceil(player.heat) || cops.length >= 5) return;
-    const angle = rand(0, Math.PI * 2), radius = Math.max(viewW, viewH) * .6;
-    let x = clamp(player.x + Math.cos(angle) * radius, 35, W - 35);
-    let y = clamp(player.y + Math.sin(angle) * radius, 35, H - 35);
-    const vertical = Math.random() > .5, lane = pick(vertical ? roadX : roadY);
-    if (vertical) x = lane + (Math.random() > .5 ? 13 : -13); else y = lane + (Math.random() > .5 ? 13 : -13);
-    cops.push({ x, y, angle: Math.atan2(player.y - y, player.x - x), speed: 105, color: '#eee', parked: false, type: 'police', length: 48, width: 24 });
+  for (const x of [-0.97, 0.97]) {
+    for (const z of [-1.14, 1.14]) {
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.39, 0.39, 0.24, 12), rubber);
+      wheel.rotation.z = Math.PI / 2; wheel.position.set(x, 0.42, z); wheel.castShadow = true; root.add(wheel);
+      const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.25, 10), chrome);
+      hub.rotation.z = Math.PI / 2; hub.position.set(x * 1.01, 0.42, z); root.add(hub);
+    }
   }
-
-  function move(dt) {
-    if (paused) return;
-    const up = keys.has('w') || keys.has('arrowup'), down = keys.has('s') || keys.has('arrowdown');
-    const left = keys.has('a') || keys.has('arrowleft'), right = keys.has('d') || keys.has('arrowright');
-    const handbrake = keys.has(' ');
-    if (player.vehicle) {
-      const v = player.vehicle;
-      const throttle = (up ? 1 : 0) - (down ? 1 : 0);
-      v.speed += throttle * 410 * dt;
-      v.speed *= Math.pow(handbrake ? .88 : .986, dt * 60);
-      v.speed = clamp(v.speed, -170, 460);
-      if (handbrake) v.speed *= Math.pow(.91, dt * 60);
-      const steer = (right ? 1 : 0) - (left ? 1 : 0);
-      v.angle += steer * (v.speed >= 0 ? 1 : -1) * Math.min(Math.abs(v.speed) / 80, 1) * 2.3 * dt;
-      const nx = clamp(v.x + Math.cos(v.angle) * v.speed * dt, 12, W - 12);
-      const ny = clamp(v.y + Math.sin(v.angle) * v.speed * dt, 12, H - 12);
-      if (rectHit(nx, ny, 17)) {
-        if (Math.abs(v.speed) > 125 && player.collisionCooldown <= 0) {
-          player.heat = clamp(player.heat + 1, 0, 5); player.health = Math.max(25, player.health - Math.min(12, Math.abs(v.speed) * .018));
-          player.collisionCooldown = 1.8;
-          announce('YOU CLIPPED A BUILDING. THE COPS NOTICED.');
-        }
-        v.speed *= -.22;
-      } else { v.x = nx; v.y = ny; }
-      player.x = v.x; player.y = v.y;
-    } else {
-      let dx = (right ? 1 : 0) - (left ? 1 : 0), dy = (down ? 1 : 0) - (up ? 1 : 0);
-      const mag = Math.hypot(dx, dy) || 1; dx /= mag; dy /= mag;
-      const nx = clamp(player.x + dx * 178 * dt, 8, W - 8), ny = clamp(player.y + dy * 178 * dt, 8, H - 8);
-      if (!rectHit(nx, player.y, 12)) player.x = nx;
-      if (!rectHit(player.x, ny, 12)) player.y = ny;
-      if (dx || dy) player.angle = Math.atan2(dy, dx) + Math.PI / 2;
-    }
-    for (const v of vehicles) {
-      if (v.parked || v === player.vehicle) continue;
-      v.x += Math.cos(v.angle) * v.speed * dt; v.y += Math.sin(v.angle) * v.speed * dt;
-      const margin = 90;
-      if (v.x < -margin || v.x > W + margin || v.y < -margin || v.y > H + margin) {
-        if (Math.abs(Math.cos(v.angle)) > .5) { v.x = v.x < 0 ? W : 0; v.y = pick(roadY) + rand(-17, 17); }
-        else { v.y = v.y < 0 ? H : 0; v.x = pick(roadX) + rand(-17, 17); }
-      }
-    }
-    while (cops.length < Math.ceil(player.heat) && player.heat >= .3) spawnCop();
-    for (let i = cops.length - 1; i >= 0; i--) {
-      const cop = cops[i];
-      const focus = player.vehicle || player;
-      const wantedAngle = Math.atan2(focus.y - cop.y, focus.x - cop.x);
-      let diff = ((wantedAngle - cop.angle + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
-      cop.angle += clamp(diff, -1.2 * dt, 1.2 * dt);
-      cop.speed = Math.min(155 + player.heat * 17, cop.speed + 18 * dt);
-      const nx = cop.x + Math.cos(cop.angle) * cop.speed * dt, ny = cop.y + Math.sin(cop.angle) * cop.speed * dt;
-      if (!rectHit(nx, ny, 15)) { cop.x = nx; cop.y = ny; } else { cop.angle += Math.PI * .68; }
-      if (dist(cop, focus) < 30 && player.hitCooldown <= 0) {
-        player.health = Math.max(0, player.health - 12); player.hitCooldown = 1.3; announce('WATCH YOUR BACK!');
-      }
-      if (player.heat <= .02 && dist(cop, focus) > 450) cops.splice(i, 1);
-    }
-    player.hitCooldown = Math.max(0, player.hitCooldown - dt);
-    player.collisionCooldown = Math.max(0, player.collisionCooldown - dt);
-    if (player.heat > 0) player.heat = Math.max(0, player.heat - dt * .035);
-    if (player.health <= 0) { player.health = 100; player.heat = 0; player.cash = Math.max(0, player.cash - 100); cops.length = 0; announce('ROUGH NIGHT. YOU LOST $100 AND GOT BACK UP.'); }
-    const target = job.phase === 'pickup' ? job.from : job.to;
-    if (dist(player, target) < 46) {
-      if (job.phase === 'pickup') { job.phase = 'drop'; announce('ENVELOPE SECURED. NOW GET IT TO LITTLE HAVANA.'); }
-      else {
-        const stops = [
-          { x: 315, y: 1155, name: 'Ocean Drive' }, { x: 895, y: 1630, name: 'Downtown' },
-          { x: 2080, y: 260, name: 'Vice Point' }, { x: 1480, y: 690, name: 'Arts District' },
-          { x: 325, y: 1660, name: 'South Beach' }, { x: 2080, y: 1140, name: 'Little Havana' }
-        ];
-        player.cash += job.reward; player.heat = Math.max(0, player.heat - .6); job.phase = 'pickup';
-        job.from = pick(stops); job.to = pick(stops.filter(stop => stop !== job.from));
-        announce(`DELIVERY COMPLETE. +$${job.reward} CASH.`);
-      }
-    }
-    updateHUD();
+  for (const x of [-0.63, 0.63]) {
+    box(root, 0.32, 0.2, 0.08, '#f9e7bd', x, 0.77, 1.88, { cast: false, material: frontLamp });
+    box(root, 0.28, 0.19, 0.08, '#d8494d', x, 0.75, -1.88, { cast: false });
+    box(root, 0.12, 0.13, 0.05, chrome, x * 1.18, 0.77, 1.91, { cast: false });
   }
-
-  function frame(now) {
-    const dt = Math.min((now - lastTime) / 1000 || 0, .04); lastTime = now;
-    move(dt); draw(now / 1000); requestAnimationFrame(frame);
+  if (type === 'police') {
+    box(root, 0.94, 0.16, 0.3, '#2e3f48', 0, 1.72, 0.0);
+    const red = box(root, 0.34, 0.13, 0.22, '#ec4262', -0.26, 1.84, 0, { cast: false, material: { emissive: '#e83258', emissiveIntensity: 0.8 } });
+    const blue = box(root, 0.34, 0.13, 0.22, '#3b94e9', 0.26, 1.84, 0, { cast: false, material: { emissive: '#387fe5', emissiveIntensity: 0.8 } });
+    root.userData.sirens = [red, blue];
   }
-  document.addEventListener('keydown', (e) => {
-    const key = e.key.toLowerCase();
-    if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(key)) e.preventDefault();
-    if (!keys.has(key) && key === 'p') { paused = !paused; document.getElementById('pause-overlay').hidden = !paused; }
-    if (!paused && !keys.has(key) && key === 'e') tryEnterExit();
-    keys.add(key);
+  root.traverse(object => { if (object.isMesh) object.receiveShadow = true; });
+  scene.add(root);
+  return root;
+}
+
+const avatar = makePerson();
+const player = { x: -48, z: -32.3, yaw: 0, speed: 0, health: 100, group: avatar, isPlayer: true };
+avatar.position.set(player.x, 0, player.z);
+
+function addVehicle(x, z, yaw, options = {}) {
+  const type = options.type || 'civilian';
+  const color = options.color || carColors[Math.floor(Math.random() * carColors.length)];
+  const car = {
+    x, z, yaw, speed: options.speed || 0, parked: options.parked ?? true,
+    color,
+    type, axis: options.axis || 'z', direction: options.direction || 1,
+    group: makeCar(color, type),
+    isPlayer: false
+  };
+  car.group.position.set(x, 0, z); car.group.rotation.y = yaw;
+  if (car.parked) car.group.userData.parked = true;
+  if (type === 'police') police.push(car); else traffic.push(car);
+  return car;
+}
+
+// The first car is always within a few steps of the opening character.
+const starterCar = addVehicle(-48, -35.8, 0, { parked: true, color: '#e9b64f' });
+for (let i = 0; i < 9; i++) {
+  const vertical = i % 2 === 0;
+  if (vertical) {
+    const lane = roadX[(i * 2 + 1) % roadX.length];
+    const z = -47 + (i * 13.1) % 109;
+    const yaw = i % 4 < 2 ? 0 : Math.PI;
+    addVehicle(lane + (i % 3 - 1) * 1.65, z, yaw, { parked: false, speed: 4.4 + (i % 4) * 1.05, axis: 'z', direction: yaw === 0 ? 1 : -1, color: carColors[(i + 2) % carColors.length] });
+  } else {
+    const lane = roadZ[(i * 2 + 1) % roadZ.length];
+    const x = -58 + (i * 14.3) % 115;
+    const yaw = i % 4 < 2 ? Math.PI / 2 : -Math.PI / 2;
+    addVehicle(x, lane + (i % 3 - 1) * 1.6, yaw, { parked: false, speed: 4.0 + (i % 3) * 1.4, axis: 'x', direction: yaw > 0 ? 1 : -1, color: carColors[(i + 4) % carColors.length] });
+  }
+}
+for (let i = 0; i < 7; i++) {
+  if (i % 2 === 0) addVehicle(roadX[(i + 2) % roadX.length] + (i % 3 - 1) * 1.45, -43 + i * 14.2, i % 4 < 2 ? 0 : Math.PI, { parked: true, color: carColors[(i + 1) % carColors.length] });
+  else addVehicle(-55 + i * 14.5, roadZ[(i + 1) % roadZ.length] + 1.1, Math.PI / 2, { parked: true, color: carColors[(i + 3) % carColors.length] });
+}
+
+function makeMarker() {
+  const group = new THREE.Group();
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.24, 0.95, 8.5, 18, 1, true), new THREE.MeshBasicMaterial({ color: '#ff5588', transparent: true, opacity: 0.15, side: THREE.DoubleSide, depthWrite: false }));
+  beam.position.y = 4.3; group.add(beam);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(1.52, 0.085, 8, 32), new THREE.MeshBasicMaterial({ color: '#ff5e91' }));
+  ring.rotation.x = Math.PI / 2; ring.position.y = 0.55; group.add(ring);
+  const cap = new THREE.Mesh(new THREE.OctahedronGeometry(0.55, 0), new THREE.MeshBasicMaterial({ color: '#ffcc8e' }));
+  cap.position.y = 2.8; group.add(cap);
+  const light = new THREE.PointLight('#ff518e', 8, 12); light.position.y = 2.5; group.add(light);
+  scene.add(group);
+  return { group, ring, cap };
+}
+const missionMarker = makeMarker();
+
+function collides(x, z, radius = 0.7) {
+  if (x < -55.2 || x < world.minX + 1 || x > world.maxX - 1 || z < world.minZ + 1 || z > world.maxZ - 1) return true;
+  return obstacles.some(o => {
+    const nx = THREE.MathUtils.clamp(x, o.x, o.x + o.w);
+    const nz = THREE.MathUtils.clamp(z, o.z, o.z + o.d);
+    return Math.hypot(x - nx, z - nz) < radius;
   });
-  document.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
-  window.addEventListener('blur', () => keys.clear());
-  document.getElementById('restart').addEventListener('click', () => location.reload());
-  resize(); updateHUD(); requestAnimationFrame(frame);
-})();
+}
+
+function focusObject() { return state.driving || player; }
+function horizontalDistance(a, b) { return Math.hypot(a.x - b.x, a.z - b.z); }
+
+function showToast(message) {
+  const toast = document.querySelector('#toast'); toast.textContent = message; toast.classList.add('show');
+  clearTimeout(state.toastTimer);
+  state.toastTimer = setTimeout(() => toast.classList.remove('show'), 2300);
+}
+
+function enterExitVehicle() {
+  if (state.driving) {
+    const car = state.driving;
+    const sideX = Math.cos(car.yaw), sideZ = -Math.sin(car.yaw);
+    let x = car.x + sideX * 2.25, z = car.z + sideZ * 2.25;
+    if (collides(x, z, 0.55)) { x = car.x - sideX * 2.25; z = car.z - sideZ * 2.25; }
+    player.x = x; player.z = z; player.yaw = car.yaw; player.speed = 0;
+    player.group.position.set(x, 0, z); player.group.rotation.y = player.yaw; player.group.visible = true;
+    car.speed = 0; car.parked = true; car.group.userData.parked = true;
+    state.driving = null; state.camDistance = 8.6;
+    showToast('OUT ON THE STREET. KEEP MOVING.');
+    return;
+  }
+  let best = 4.25, nearest = null;
+  for (const car of traffic) {
+    const d = horizontalDistance(player, car);
+    if (d < best) { best = d; nearest = car; }
+  }
+  if (!nearest) { showToast('NO RIDE CLOSE ENOUGH. WALK A LITTLE.'); return; }
+  nearest.parked = false;
+  nearest.group.userData.parked = false;
+  state.driving = nearest;
+  player.group.visible = false;
+  state.camDistance = 10.6;
+  showToast('NICE RIDE. MAKE IT COUNT.');
+}
+
+function spawnPolice() {
+  if (police.length >= Math.min(4, Math.ceil(state.heat))) return;
+  const focus = focusObject();
+  const roadVertical = Math.random() > 0.5;
+  let x, z, yaw;
+  if (roadVertical) {
+    x = roadX.reduce((best, lane) => Math.abs(lane - focus.x) < Math.abs(best - focus.x) ? lane : best, roadX[0]);
+    z = THREE.MathUtils.clamp(focus.z + (Math.random() > 0.5 ? -1 : 1) * 25, world.minZ + 5, world.maxZ - 5);
+    yaw = z < focus.z ? 0 : Math.PI;
+  } else {
+    z = roadZ.reduce((best, lane) => Math.abs(lane - focus.z) < Math.abs(best - focus.z) ? lane : best, roadZ[0]);
+    x = THREE.MathUtils.clamp(focus.x + (Math.random() > 0.5 ? -1 : 1) * 25, world.minX + 5, world.maxX - 5);
+    yaw = x < focus.x ? Math.PI / 2 : -Math.PI / 2;
+  }
+  addVehicle(x, z, yaw, { type: 'police', parked: false, speed: 8, axis: roadVertical ? 'z' : 'x', direction: 1 });
+}
+
+function updateWalking(dt) {
+  const forwardInput = (keys.has('w') || keys.has('arrowup') ? 1 : 0) - (keys.has('s') || keys.has('arrowdown') ? 1 : 0);
+  const sideInput = (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0);
+  const cameraYaw = player.yaw + state.camOrbit;
+  const forwardX = Math.sin(cameraYaw), forwardZ = Math.cos(cameraYaw);
+  const rightX = Math.cos(cameraYaw), rightZ = -Math.sin(cameraYaw);
+  let dx = forwardX * forwardInput + rightX * sideInput;
+  let dz = forwardZ * forwardInput + rightZ * sideInput;
+  const length = Math.hypot(dx, dz);
+  if (length > 0) {
+    dx /= length; dz /= length;
+    const nx = player.x + dx * 6.2 * dt, nz = player.z + dz * 6.2 * dt;
+    if (!collides(nx, player.z, 0.55)) player.x = nx;
+    if (!collides(player.x, nz, 0.55)) player.z = nz;
+    player.yaw = Math.atan2(dx, dz);
+  }
+  player.group.position.set(player.x, 0, player.z);
+  player.group.rotation.y = player.yaw;
+  const stride = length ? Math.sin(state.elapsed * 10.5) * 0.48 : 0;
+  const limbs = player.group.userData.limbs;
+  limbs.leftArm.rotation.x = stride;
+  limbs.rightArm.rotation.x = -stride;
+  limbs.legs[0].rotation.x = -stride;
+  limbs.legs[1].rotation.x = stride;
+}
+
+function updateDriving(dt) {
+  const car = state.driving;
+  const throttle = (keys.has('w') || keys.has('arrowup') ? 1 : 0) - (keys.has('s') || keys.has('arrowdown') ? 1 : 0);
+  const steer = (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0);
+  const handbrake = keys.has(' ');
+  car.speed += throttle * 13.5 * dt;
+  car.speed *= Math.pow(handbrake ? 0.88 : 0.988, dt * 60);
+  car.speed = THREE.MathUtils.clamp(car.speed, -8.5, 23.5);
+  if (handbrake) car.speed *= Math.pow(0.95, dt * 60);
+  car.yaw += steer * Math.sign(car.speed || 1) * Math.min(Math.abs(car.speed) / 5, 1) * 1.95 * dt;
+  const nx = car.x + Math.sin(car.yaw) * car.speed * dt;
+  const nz = car.z + Math.cos(car.yaw) * car.speed * dt;
+  if (collides(nx, nz, 1.05)) {
+    car.speed *= -0.2;
+    if (Math.abs(car.speed) > 2.8 && state.collisionWait <= 0) {
+      state.heat = Math.min(5, state.heat + 1);
+      state.health = Math.max(22, state.health - 8);
+      state.collisionWait = 1.5;
+      state.lastCrime = state.elapsed;
+      showToast('YOU CLIPPED A BUILDING. THE COPS NOTICED.');
+    }
+  } else { car.x = nx; car.z = nz; }
+  car.group.position.set(car.x, 0, car.z);
+  car.group.rotation.y = car.yaw;
+}
+
+function updateTraffic(dt) {
+  for (const car of traffic) {
+    if (car.parked || car === state.driving) continue;
+    if (car.axis === 'z') {
+      car.z += car.direction * car.speed * dt;
+      if (car.z > world.maxZ + 3) car.z = world.minZ - 3;
+      if (car.z < world.minZ - 3) car.z = world.maxZ + 3;
+    } else {
+      car.x += car.direction * car.speed * dt;
+      if (car.x > world.maxX + 3) car.x = world.minX - 3;
+      if (car.x < world.minX - 3) car.x = world.maxX + 3;
+    }
+    car.group.position.set(car.x, 0, car.z);
+  }
+}
+
+function updatePolice(dt) {
+  while (police.length < Math.ceil(state.heat) && state.heat >= 0.3) spawnPolice();
+  for (let i = police.length - 1; i >= 0; i--) {
+    const cop = police[i];
+    const focus = focusObject();
+    const dx = focus.x - cop.x, dz = focus.z - cop.z;
+    const desiredYaw = Math.atan2(dx, dz);
+    const difference = THREE.MathUtils.euclideanModulo(desiredYaw - cop.yaw + Math.PI, Math.PI * 2) - Math.PI;
+    cop.yaw += THREE.MathUtils.clamp(difference, -1.2 * dt, 1.2 * dt);
+    cop.speed = Math.min(13.5 + state.heat * 1.15, cop.speed + 3 * dt);
+    const nx = cop.x + Math.sin(cop.yaw) * cop.speed * dt;
+    const nz = cop.z + Math.cos(cop.yaw) * cop.speed * dt;
+    if (!collides(nx, nz, 1.2)) { cop.x = nx; cop.z = nz; }
+    else cop.yaw += Math.PI * 0.72;
+    cop.group.position.set(cop.x, 0, cop.z); cop.group.rotation.y = cop.yaw;
+    for (const siren of cop.group.userData.sirens || []) siren.material.emissiveIntensity = Math.sin(state.elapsed * 13 + (siren.position.x > 0 ? Math.PI : 0)) > 0 ? 1.2 : 0.16;
+    if (horizontalDistance(cop, focus) < 2.25 && state.hitWait <= 0) {
+      state.health = Math.max(0, state.health - 12); state.hitWait = 1.4; showToast('WATCH YOUR BACK!');
+    }
+    if (state.heat <= 0.01 && horizontalDistance(cop, focus) > 26) {
+      scene.remove(cop.group); police.splice(i, 1);
+    }
+  }
+}
+
+function updateMission() {
+  const target = state.job.phase === 'pickup' ? state.job.from : state.job.to;
+  const distance = horizontalDistance(focusObject(), target);
+  if (distance > 2.5) return;
+  if (state.job.phase === 'pickup') {
+    state.job.phase = 'drop';
+    showToast('ENVELOPE SECURED. NOW GET IT TO LITTLE HAVANA.');
+  } else {
+    const stops = [
+      { x: -48, z: 16, name: 'Ocean Drive' }, { x: -24, z: 55, name: 'Downtown' },
+      { x: 48, z: -31, name: 'Vice Point' }, { x: 0, z: -7, name: 'Arts District' },
+      { x: 24, z: 55, name: 'South Beach' }, { x: 48, z: 17, name: 'Little Havana' }
+    ];
+    state.cash += state.job.reward;
+    state.heat = Math.max(0, state.heat - 1);
+    state.job.phase = 'pickup';
+    state.job.from = stops[Math.floor(Math.random() * stops.length)];
+    state.job.to = stops.filter(stop => stop !== state.job.from)[Math.floor(Math.random() * (stops.length - 1))];
+    showToast(`DELIVERY COMPLETE. +$${state.job.reward} CASH.`);
+  }
+}
+
+function updateWorld(dt) {
+  state.elapsed += dt;
+  if (state.paused) return;
+  if (state.driving) updateDriving(dt); else updateWalking(dt);
+  updateTraffic(dt);
+  updatePolice(dt);
+  state.collisionWait = Math.max(0, state.collisionWait - dt);
+  state.hitWait = Math.max(0, state.hitWait - dt);
+  if (state.heat > 0 && state.elapsed - state.lastCrime > 2.5) state.heat = Math.max(0, state.heat - dt * 0.055);
+  if (state.health <= 0) {
+    state.health = 100; state.heat = 0; state.cash = Math.max(0, state.cash - 100);
+    player.x = -48; player.z = -32.3; player.yaw = 0;
+    if (state.driving) { state.driving.group.userData.parked = true; state.driving.parked = true; state.driving.speed = 0; }
+    state.driving = null; player.group.visible = true; police.splice(0).forEach(cop => scene.remove(cop.group));
+    showToast('ROUGH NIGHT. YOU LOST $100 AND GOT BACK UP.');
+  }
+  updateMission();
+}
+
+function updateMarker() {
+  const target = state.job.phase === 'pickup' ? state.job.from : state.job.to;
+  missionMarker.group.position.set(target.x, 0.05, target.z);
+  const pulse = 1 + Math.sin(state.elapsed * 3.5) * 0.1;
+  missionMarker.ring.scale.setScalar(pulse);
+  missionMarker.ring.rotation.z += 0.01;
+  missionMarker.cap.position.y = 2.75 + Math.sin(state.elapsed * 2.6) * 0.28;
+  missionMarker.cap.rotation.y += 0.018;
+  missionMarker.group.visible = !state.paused;
+}
+
+function updateCamera(dt) {
+  const focus = focusObject();
+  const yaw = focus.yaw + state.camOrbit;
+  const distance = state.camDistance;
+  const horizontal = Math.cos(state.camPitch) * distance;
+  const target = new THREE.Vector3(focus.x, state.driving ? 1.45 : 1.65, focus.z);
+  const desired = new THREE.Vector3(
+    focus.x - Math.sin(yaw) * horizontal,
+    target.y + Math.sin(state.camPitch) * distance,
+    focus.z - Math.cos(yaw) * horizontal
+  );
+  camera.position.lerp(desired, 1 - Math.exp(-dt * 5.5));
+  camera.lookAt(target);
+}
+
+function drawMinimap() {
+  const mini = document.querySelector('#minimap');
+  const c = mini.getContext('2d');
+  const w = mini.width, h = mini.height;
+  c.clearRect(0, 0, w, h); c.fillStyle = '#31564f'; c.fillRect(0, 0, w, h);
+  const sx = (x) => (x - world.minX) / (world.maxX - world.minX) * w;
+  const sz = (z) => (z - world.minZ) / (world.maxZ - world.minZ) * h;
+  c.fillStyle = '#258b91'; c.fillRect(0, 0, sx(-56), h);
+  c.fillStyle = '#cfbc92'; c.fillRect(sx(-56), 0, sx(-54.8) - sx(-56), h);
+  c.fillStyle = '#747b75';
+  for (const x of roadX) c.fillRect(sx(x - ROAD / 2), 0, sx(x + ROAD / 2) - sx(x - ROAD / 2), h);
+  for (const z of roadZ) c.fillRect(0, sz(z - ROAD / 2), w, sz(z + ROAD / 2) - sz(z - ROAD / 2));
+  const target = state.job.phase === 'pickup' ? state.job.from : state.job.to;
+  c.fillStyle = '#ff5e91'; c.beginPath(); c.arc(sx(target.x), sz(target.z), 3.3, 0, Math.PI * 2); c.fill();
+  for (const cop of police) { c.fillStyle = '#69a8f2'; c.fillRect(sx(cop.x) - 1.5, sz(cop.z) - 1.5, 3, 3); }
+  const focus = focusObject();
+  c.save(); c.translate(sx(focus.x), sz(focus.z)); c.rotate(-focus.yaw);
+  c.fillStyle = '#6af5d8'; c.beginPath(); c.moveTo(0, -5); c.lineTo(3.2, 3.2); c.lineTo(0, 1.7); c.lineTo(-3.2, 3.2); c.closePath(); c.fill(); c.restore();
+}
+
+function updateHud() {
+  document.querySelector('#cash').textContent = state.cash.toLocaleString('en-US');
+  const count = Math.ceil(state.heat);
+  const stars = document.querySelector('#stars');
+  stars.innerHTML = Array.from({ length: 5 }, (_, i) => `<span class="${i < count ? 'lit' : ''}">${i < count ? '★' : '☆'}</span>`).join(' ');
+  stars.setAttribute('aria-label', `${count} wanted stars`);
+  document.querySelector('#health-fill').style.width = `${state.health}%`;
+  document.querySelector('#health-value').textContent = Math.round(state.health);
+  const target = state.job.phase === 'pickup' ? state.job.from : state.job.to;
+  document.querySelector('#mission-phase').textContent = state.job.phase === 'pickup' ? 'SIDE HUSTLE 01' : 'SIDE HUSTLE 01 / DELIVERY';
+  document.querySelector('#mission-title').textContent = state.job.phase === 'pickup' ? 'A little delivery' : 'Take it to the club';
+  document.querySelector('#mission-copy').textContent = state.job.phase === 'pickup' ? 'Collect the envelope at Ocean Drive. Drop it off before the sun goes down.' : 'The package is yours. Get it to the club in Little Havana and keep a low profile.';
+  document.querySelector('#mission-distance').textContent = `${Math.round(horizontalDistance(focusObject(), target))} M TO ${state.job.phase === 'pickup' ? 'PICKUP' : 'DROP'}`;
+  document.querySelector('#mission-reward').textContent = `+$${state.job.reward}`;
+  document.querySelector('#mission-card .mission-live').textContent = state.job.phase === 'pickup' ? 'AVAILABLE' : 'IN PROGRESS';
+  const focus = focusObject();
+  document.querySelector('#district').textContent = focus.x < -34 ? 'OCEAN DRIVE' : focus.x < 15 ? 'ARTS DISTRICT' : focus.z > 8 ? 'LITTLE HAVANA' : 'VICE POINT';
+  const speed = state.driving ? Math.round(Math.abs(state.driving.speed) * 4.1) : 0;
+  document.querySelector('#speed').textContent = String(speed).padStart(2, '0');
+  document.querySelector('#needle').style.transform = `rotate(${-130 + Math.min(speed / 96, 1) * 260}deg)`;
+  document.querySelector('#vehicle-mode').textContent = state.driving ? 'COUPE' : 'ON FOOT';
+  document.querySelector('#gear').textContent = state.driving ? (state.driving.speed < -0.5 ? 'REV' : speed > 0 ? 'DRIVE' : 'IDLE') : 'WALK';
+  document.querySelector('#move-hint').textContent = state.driving ? 'DRIVE' : 'MOVE';
+  drawMinimap();
+}
+
+function resize() {
+  const bounds = stage.getBoundingClientRect();
+  renderer.setSize(bounds.width, bounds.height, false);
+  camera.aspect = bounds.width / Math.max(bounds.height, 1);
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(stage);
+window.addEventListener('resize', resize);
+
+let pointer = null;
+canvas.addEventListener('pointerdown', (event) => {
+  pointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+  canvas.setPointerCapture(event.pointerId);
+  canvas.classList.add('looking');
+});
+canvas.addEventListener('pointermove', (event) => {
+  if (!pointer || pointer.id !== event.pointerId) return;
+  const dx = event.clientX - pointer.x, dy = event.clientY - pointer.y;
+  state.camOrbit -= dx * 0.007;
+  state.camPitch = THREE.MathUtils.clamp(state.camPitch + dy * 0.0035, 0.22, 0.86);
+  pointer.x = event.clientX; pointer.y = event.clientY;
+});
+function releasePointer() { pointer = null; canvas.classList.remove('looking'); }
+canvas.addEventListener('pointerup', releasePointer);
+canvas.addEventListener('pointercancel', releasePointer);
+canvas.addEventListener('wheel', (event) => {
+  event.preventDefault(); state.camDistance = THREE.MathUtils.clamp(state.camDistance + event.deltaY * 0.007, 5.4, 15.5);
+}, { passive: false });
+
+document.addEventListener('keydown', (event) => {
+  const key = event.key.toLowerCase();
+  if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(key)) event.preventDefault();
+  if (key === 'p' && !keys.has(key)) {
+    state.paused = !state.paused;
+    document.querySelector('#pause-overlay').hidden = !state.paused;
+  }
+  if (key === 'e' && !keys.has(key) && !state.paused) enterExitVehicle();
+  keys.add(key);
+});
+document.addEventListener('keyup', event => keys.delete(event.key.toLowerCase()));
+window.addEventListener('blur', () => keys.clear());
+document.querySelector('#restart').addEventListener('click', () => window.location.reload());
+
+function animate() {
+  const dt = Math.min(clock.getDelta(), 0.04);
+  updateWorld(dt);
+  updateMarker();
+  updateCamera(dt);
+  for (let i = 0; i < scene.children.length; i++) {
+    const object = scene.children[i];
+    if (object.name === 'ocean-ripple') object.position.x = object.userData.baseX + Math.sin(state.elapsed * 0.6 + object.userData.phase) * 0.42;
+  }
+  updateHud();
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+
+resize();
+updateHud();
+requestAnimationFrame(animate);
