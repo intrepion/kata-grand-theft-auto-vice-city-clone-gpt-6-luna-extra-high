@@ -21,6 +21,8 @@ const roadX = [-48, -24, 0, 24, 48];
 const roadZ = [-36, -12, 12, 36, 60];
 const world = { minX: -66, maxX: 66, minZ: -54, maxZ: 70 };
 const keys = new Set();
+const tappedKeys = new Set();
+const controlKeys = new Set(['w', 'a', 's', 'd', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' ']);
 const obstacles = [];
 const traffic = [];
 const police = [];
@@ -490,8 +492,8 @@ function spawnPolice() {
 }
 
 function updateWalking(dt) {
-  const forwardInput = (keys.has('w') || keys.has('arrowup') ? 1 : 0) - (keys.has('s') || keys.has('arrowdown') ? 1 : 0);
-  const sideInput = (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0);
+  const forwardInput = (isControlDown('w') || isControlDown('arrowup') ? 1 : 0) - (isControlDown('s') || isControlDown('arrowdown') ? 1 : 0);
+  const sideInput = (isControlDown('d') || isControlDown('arrowright') ? 1 : 0) - (isControlDown('a') || isControlDown('arrowleft') ? 1 : 0);
   const cameraYaw = player.yaw + state.camOrbit;
   const forwardX = Math.sin(cameraYaw), forwardZ = Math.cos(cameraYaw);
   const rightX = Math.cos(cameraYaw), rightZ = -Math.sin(cameraYaw);
@@ -517,9 +519,9 @@ function updateWalking(dt) {
 
 function updateDriving(dt) {
   const car = state.driving;
-  const throttle = (keys.has('w') || keys.has('arrowup') ? 1 : 0) - (keys.has('s') || keys.has('arrowdown') ? 1 : 0);
-  const steer = (keys.has('d') || keys.has('arrowright') ? 1 : 0) - (keys.has('a') || keys.has('arrowleft') ? 1 : 0);
-  const handbrake = keys.has(' ');
+  const throttle = (isControlDown('w') || isControlDown('arrowup') ? 1 : 0) - (isControlDown('s') || isControlDown('arrowdown') ? 1 : 0);
+  const steer = (isControlDown('d') || isControlDown('arrowright') ? 1 : 0) - (isControlDown('a') || isControlDown('arrowleft') ? 1 : 0);
+  const handbrake = isControlDown(' ');
   car.speed += throttle * 13.5 * dt;
   car.speed *= Math.pow(handbrake ? 0.88 : 0.988, dt * 60);
   car.speed = THREE.MathUtils.clamp(car.speed, -8.5, 23.5);
@@ -606,8 +608,9 @@ function updateMission() {
 
 function updateWorld(dt) {
   state.elapsed += dt;
-  if (state.paused) return;
+  if (state.paused) { tappedKeys.clear(); return; }
   if (state.driving) updateDriving(dt); else updateWalking(dt);
+  tappedKeys.clear();
   updateTraffic(dt);
   updatePolice(dt);
   state.collisionWait = Math.max(0, state.collisionWait - dt);
@@ -706,6 +709,7 @@ window.addEventListener('resize', resize);
 
 let pointer = null;
 canvas.addEventListener('pointerdown', (event) => {
+  canvas.focus({ preventScroll: true });
   pointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
   canvas.setPointerCapture(event.pointerId);
   canvas.classList.add('looking');
@@ -724,18 +728,25 @@ canvas.addEventListener('wheel', (event) => {
   event.preventDefault(); state.camDistance = THREE.MathUtils.clamp(state.camDistance + event.deltaY * 0.007, 5.4, 15.5);
 }, { passive: false });
 
+function isControlDown(key) { return keys.has(key) || tappedKeys.has(key); }
+
+function eventKey(event) { return event.key.toLowerCase(); }
+
 document.addEventListener('keydown', (event) => {
-  const key = event.key.toLowerCase();
-  if (['arrowup', 'arrowdown', 'arrowleft', 'arrowright', ' '].includes(key)) event.preventDefault();
+  const key = eventKey(event);
+  if (controlKeys.has(key)) event.preventDefault();
   if (key === 'p' && !keys.has(key)) {
     state.paused = !state.paused;
     document.querySelector('#pause-overlay').hidden = !state.paused;
   }
   if (key === 'e' && !keys.has(key) && !state.paused) enterExitVehicle();
+  if (!keys.has(key) && controlKeys.has(key)) tappedKeys.add(key);
   keys.add(key);
 });
-document.addEventListener('keyup', event => keys.delete(event.key.toLowerCase()));
-window.addEventListener('blur', () => keys.clear());
+document.addEventListener('keyup', event => keys.delete(eventKey(event)));
+function clearKeyboardInput() { keys.clear(); tappedKeys.clear(); }
+window.addEventListener('blur', clearKeyboardInput);
+document.addEventListener('visibilitychange', () => { if (document.hidden) clearKeyboardInput(); });
 document.querySelector('#restart').addEventListener('click', () => window.location.reload());
 
 function animate() {

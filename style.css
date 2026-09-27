@@ -32,6 +32,7 @@ button { font: inherit; }
 .restart-button span { font: 18px var(--display); vertical-align: -2px; padding-right: 5px; }
 .game-stage { min-height: 0; position: relative; overflow: hidden; background: #91b5a0; isolation: isolate; }
 #game { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+#game:focus-visible { outline: 2px solid var(--aqua); outline-offset: -4px; }
 #game.looking { cursor: grabbing; }
 .scanlines { position: absolute; inset: 0; pointer-events: none; opacity: .14; z-index: 1; background: repeating-linear-gradient(0deg, transparent 0 3px, #031119 4px); mix-blend-mode: multiply; }
 .hud { position: absolute; z-index: 2; top: 22px; background: #101820e8; border: 1px solid #ffffff28; box-shadow: 5px 5px 0 #0c141a45; backdrop-filter: blur(9px); }
