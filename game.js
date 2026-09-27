@@ -500,7 +500,7 @@ function spawnPolice() {
 
 function updateWalking(dt) {
   const forwardInput = (isControlDown('w') || isControlDown('arrowup') ? 1 : 0) - (isControlDown('s') || isControlDown('arrowdown') ? 1 : 0);
-  const sideInput = (isControlDown('d') || isControlDown('arrowright') ? 1 : 0) - (isControlDown('a') || isControlDown('arrowleft') ? 1 : 0);
+  const sideInput = (isControlDown('a') || isControlDown('arrowleft') ? 1 : 0) - (isControlDown('d') || isControlDown('arrowright') ? 1 : 0);
   const cameraYaw = state.camYaw;
   const forwardX = Math.sin(cameraYaw), forwardZ = Math.cos(cameraYaw);
   const rightX = Math.cos(cameraYaw), rightZ = -Math.sin(cameraYaw);
@@ -531,7 +531,7 @@ function updateWalking(dt) {
 function updateDriving(dt) {
   const car = state.driving;
   const throttle = (isControlDown('w') || isControlDown('arrowup') ? 1 : 0) - (isControlDown('s') || isControlDown('arrowdown') ? 1 : 0);
-  const steer = (isControlDown('d') || isControlDown('arrowright') ? 1 : 0) - (isControlDown('a') || isControlDown('arrowleft') ? 1 : 0);
+  const steer = (isControlDown('a') || isControlDown('arrowleft') ? 1 : 0) - (isControlDown('d') || isControlDown('arrowright') ? 1 : 0);
   const handbrake = isControlDown(' ');
   car.speed += throttle * 13.5 * dt;
   car.speed *= Math.pow(handbrake ? 0.88 : 0.988, dt * 60);
