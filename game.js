@@ -33,6 +33,7 @@ const materialCache = new Map();
 const state = {
   cash: 250, health: 100, heat: 0, paused: false, driving: null,
   camYaw: 0, camOrbit: 0, camPitch: 0.48, camDistance: 8.6,
+  cameraReturnDelay: 0, cameraTravelReverse: false,
   cameraManualLook: false, walkingInputActive: false, collisionWait: 0, hitWait: 0,
   toastTimer: 0, lastCrime: 0, elapsed: 0,
   job: { phase: 'pickup', from: { x: -24, z: -29, name: 'Ocean Drive' }, to: { x: 24, z: 17, name: 'Little Havana' }, reward: 350 }
@@ -459,6 +460,8 @@ function enterExitVehicle() {
     car.speed = 0; car.parked = true; car.group.userData.parked = true;
     state.camYaw = car.yaw + state.camOrbit;
     state.camOrbit = 0;
+    state.cameraReturnDelay = 0;
+    state.cameraTravelReverse = false;
     state.cameraManualLook = true;
     state.walkingInputActive = false;
     state.driving = null; state.camDistance = 8.6;
@@ -473,7 +476,9 @@ function enterExitVehicle() {
   if (!nearest) { showToast('NO RIDE CLOSE ENOUGH. WALK A LITTLE.'); return; }
   nearest.parked = false;
   nearest.group.userData.parked = false;
-  state.camOrbit = state.camYaw - nearest.yaw;
+  state.camOrbit = 0;
+  state.cameraReturnDelay = 0;
+  state.cameraTravelReverse = false;
   state.walkingInputActive = false;
   state.driving = nearest;
   player.group.visible = false;
@@ -537,6 +542,8 @@ function updateDriving(dt) {
   car.speed *= Math.pow(handbrake ? 0.88 : 0.988, dt * 60);
   car.speed = THREE.MathUtils.clamp(car.speed, -8.5, 23.5);
   if (handbrake) car.speed *= Math.pow(0.95, dt * 60);
+  if (car.speed < -0.35) state.cameraTravelReverse = true;
+  else if (car.speed > 0.35) state.cameraTravelReverse = false;
   const steeringAuthority = Math.min(Math.abs(car.speed) / 6, 1);
   car.yaw += steer * Math.sign(car.speed || 1) * steeringAuthority * 1.35 * dt;
   const nx = car.x + Math.sin(car.yaw) * car.speed * dt;
@@ -651,6 +658,14 @@ function updateMarker() {
 
 function updateCamera(dt) {
   const focus = focusObject();
+  if (state.driving) {
+    state.cameraReturnDelay = Math.max(0, state.cameraReturnDelay - dt);
+    if (state.cameraReturnDelay === 0) {
+      const targetOrbit = state.cameraTravelReverse ? Math.PI : 0;
+      const orbitDelta = Math.atan2(Math.sin(targetOrbit - state.camOrbit), Math.cos(targetOrbit - state.camOrbit));
+      state.camOrbit += orbitDelta * (1 - Math.exp(-dt * 2));
+    }
+  }
   if (!state.driving && !state.walkingInputActive && !state.cameraManualLook) {
     const yawDelta = Math.atan2(Math.sin(player.yaw - state.camYaw), Math.cos(player.yaw - state.camYaw));
     state.camYaw += yawDelta * (1 - Math.exp(-dt * 5.5));
@@ -733,7 +748,10 @@ canvas.addEventListener('pointerdown', (event) => {
 canvas.addEventListener('pointermove', (event) => {
   if (!pointer || pointer.id !== event.pointerId) return;
   const dx = event.clientX - pointer.x, dy = event.clientY - pointer.y;
-  if (state.driving) state.camOrbit -= dx * 0.007;
+  if (state.driving) {
+    state.camOrbit -= dx * 0.007;
+    state.cameraReturnDelay = 1.1;
+  }
   else { state.camYaw -= dx * 0.007; state.cameraManualLook = true; }
   state.camPitch = THREE.MathUtils.clamp(state.camPitch + dy * 0.0035, 0.22, 0.86);
   pointer.x = event.clientX; pointer.y = event.clientY;
