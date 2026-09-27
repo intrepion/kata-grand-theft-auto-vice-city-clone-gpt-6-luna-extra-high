@@ -313,9 +313,10 @@ function makePerson() {
   box(root, 0.78, 1.05, 0.47, '#e9f0db', 0, 1.52, 0);
   box(root, 0.78, 0.46, 0.49, '#e65f83', 0, 1.32, 0.02);
   box(root, 0.66, 0.14, 0.51, '#f1d9a9', 0, 1.03, 0);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.31, 14, 12), skin); head.position.set(0, 2.29, 0.02); root.add(head);
-  const hairCap = new THREE.Mesh(new THREE.SphereGeometry(0.315, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.56), hair); hairCap.position.set(0, 2.39, -0.015); root.add(hairCap);
-  box(root, 0.12, 0.18, 0.11, '#f0c27f', 0, 2.31, 0.29, { cast: false });
+  const head = new THREE.Group(); head.position.set(0, 2, 0); root.add(head);
+  const headMesh = new THREE.Mesh(new THREE.SphereGeometry(0.31, 14, 12), skin); headMesh.position.set(0, 0.29, 0.02); head.add(headMesh);
+  const hairCap = new THREE.Mesh(new THREE.SphereGeometry(0.315, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.56), hair); hairCap.position.set(0, 0.39, -0.015); head.add(hairCap);
+  box(head, 0.12, 0.18, 0.11, '#f0c27f', 0, 0.31, 0.29, { cast: false });
   const leftArm = new THREE.Group(); leftArm.position.set(-0.51, 1.9, 0); root.add(leftArm);
   box(leftArm, 0.23, 0.86, 0.25, '#f1eee0', 0, -0.39, 0);
   const rightArm = new THREE.Group(); rightArm.position.set(0.51, 1.9, 0); root.add(rightArm);
@@ -327,7 +328,7 @@ function makePerson() {
     box(leg, 0.31, 0.18, 0.5, '#262f35', 0, -0.83, 0.075);
     legs.push(leg);
   }
-  root.userData.limbs = { leftArm, rightArm, legs };
+  root.userData.limbs = { head, leftArm, rightArm, legs };
   root.traverse(object => { if (object.isMesh) { object.castShadow = true; object.receiveShadow = true; } });
   scene.add(root);
   return root;
@@ -519,7 +520,10 @@ function updateWalking(dt) {
     const nx = player.x + dx * 6.2 * dt, nz = player.z + dz * 6.2 * dt;
     if (!collides(nx, player.z, 0.55)) player.x = nx;
     if (!collides(player.x, nz, 0.55)) player.z = nz;
-    player.yaw = Math.atan2(dx, dz);
+    const strafeAmount = dx * rightX + dz * rightZ;
+    const targetYaw = cameraYaw + strafeAmount * 0.35;
+    const yawDelta = Math.atan2(Math.sin(targetYaw - player.yaw), Math.cos(targetYaw - player.yaw));
+    player.yaw += yawDelta * (1 - Math.exp(-dt * 12));
   } else {
     state.walkingInputActive = false;
   }
@@ -527,6 +531,8 @@ function updateWalking(dt) {
   player.group.rotation.y = player.yaw;
   const stride = length ? Math.sin(state.elapsed * 10.5) * 0.48 : 0;
   const limbs = player.group.userData.limbs;
+  const headYaw = Math.atan2(Math.sin(cameraYaw - player.yaw), Math.cos(cameraYaw - player.yaw));
+  limbs.head.rotation.set(state.camPitch - 0.48, headYaw, 0);
   limbs.leftArm.rotation.x = stride;
   limbs.rightArm.rotation.x = -stride;
   limbs.legs[0].rotation.x = -stride;
