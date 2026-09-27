@@ -4,14 +4,19 @@
   "version": "2.0.0",
   "type": "module",
   "scripts": {
+    "bundle": "esbuild game.js --bundle --minify --format=iife --outfile=game.bundle.js",
+    "predev": "npm run bundle",
     "dev": "vite",
-    "build": "vite build",
+    "prebuild": "npm run bundle",
+    "build": "vite build --base=./",
+    "postbuild": "node scripts/copy-game-bundle.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
     "three": "^0.186.1"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
     "vite": "^8.3.1"
   }
 }

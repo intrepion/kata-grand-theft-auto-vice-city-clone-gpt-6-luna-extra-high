@@ -4,14 +4,14 @@ A small, original third-person 3D open-world driving game: walk a pastel coastal
 
 ## Play
 
-Install the dependencies and start the local server:
+For a quick play, open `index.html` in a WebGL 2 capable browser. For source development, install the dependencies and start the local server:
 
 ```sh
 npm install
 npm run dev
 ```
 
-Open the local URL Vite prints in a WebGL 2 capable browser. To create a static production build, run `npm run build`; Vite writes it to `dist/`.
+Open the local URL Vite prints. To create a static production build, run `npm run build`; Vite writes it to `dist/`.
 
 ## Controls
 

@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Outfit:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
     <main class="game-shell">
@@ -74,6 +74,10 @@
       </section>
       <footer class="footer"><span>MADE FOR THE AFTER HOURS</span><span>WALK THE WALK. DRIVE THE NIGHT.</span><span>V 2.0 <i>◆</i></span></footer>
     </main>
-    <script type="module" src="/game.js"></script>
+    <script>
+      const standaloneGameScript = document.createElement('script');
+      standaloneGameScript.src = './game.bundle.js';
+      document.body.append(standaloneGameScript);
+    </script>
   </body>
 </html>
