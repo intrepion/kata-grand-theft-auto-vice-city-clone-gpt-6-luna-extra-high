@@ -32,7 +32,8 @@ const materialCache = new Map();
 
 const state = {
   cash: 250, health: 100, heat: 0, paused: false, driving: null,
-  camOrbit: 0, camPitch: 0.48, camDistance: 8.6, collisionWait: 0, hitWait: 0,
+  camYaw: 0, camOrbit: 0, camPitch: 0.48, camDistance: 8.6,
+  cameraManualLook: false, walkingInputActive: false, collisionWait: 0, hitWait: 0,
   toastTimer: 0, lastCrime: 0, elapsed: 0,
   job: { phase: 'pickup', from: { x: -24, z: -29, name: 'Ocean Drive' }, to: { x: 24, z: 17, name: 'Little Havana' }, reward: 350 }
 };
@@ -456,6 +457,10 @@ function enterExitVehicle() {
     player.x = x; player.z = z; player.yaw = car.yaw; player.speed = 0;
     player.group.position.set(x, 0, z); player.group.rotation.y = player.yaw; player.group.visible = true;
     car.speed = 0; car.parked = true; car.group.userData.parked = true;
+    state.camYaw = car.yaw + state.camOrbit;
+    state.camOrbit = 0;
+    state.cameraManualLook = true;
+    state.walkingInputActive = false;
     state.driving = null; state.camDistance = 8.6;
     showToast('OUT ON THE STREET. KEEP MOVING.');
     return;
@@ -468,6 +473,8 @@ function enterExitVehicle() {
   if (!nearest) { showToast('NO RIDE CLOSE ENOUGH. WALK A LITTLE.'); return; }
   nearest.parked = false;
   nearest.group.userData.parked = false;
+  state.camOrbit = state.camYaw - nearest.yaw;
+  state.walkingInputActive = false;
   state.driving = nearest;
   player.group.visible = false;
   state.camDistance = 10.6;
@@ -494,18 +501,22 @@ function spawnPolice() {
 function updateWalking(dt) {
   const forwardInput = (isControlDown('w') || isControlDown('arrowup') ? 1 : 0) - (isControlDown('s') || isControlDown('arrowdown') ? 1 : 0);
   const sideInput = (isControlDown('d') || isControlDown('arrowright') ? 1 : 0) - (isControlDown('a') || isControlDown('arrowleft') ? 1 : 0);
-  const cameraYaw = player.yaw + state.camOrbit;
+  const cameraYaw = state.camYaw;
   const forwardX = Math.sin(cameraYaw), forwardZ = Math.cos(cameraYaw);
   const rightX = Math.cos(cameraYaw), rightZ = -Math.sin(cameraYaw);
   let dx = forwardX * forwardInput + rightX * sideInput;
   let dz = forwardZ * forwardInput + rightZ * sideInput;
   const length = Math.hypot(dx, dz);
   if (length > 0) {
+    if (!state.walkingInputActive) state.cameraManualLook = false;
+    state.walkingInputActive = true;
     dx /= length; dz /= length;
     const nx = player.x + dx * 6.2 * dt, nz = player.z + dz * 6.2 * dt;
     if (!collides(nx, player.z, 0.55)) player.x = nx;
     if (!collides(player.x, nz, 0.55)) player.z = nz;
     player.yaw = Math.atan2(dx, dz);
+  } else {
+    state.walkingInputActive = false;
   }
   player.group.position.set(player.x, 0, player.z);
   player.group.rotation.y = player.yaw;
@@ -526,7 +537,8 @@ function updateDriving(dt) {
   car.speed *= Math.pow(handbrake ? 0.88 : 0.988, dt * 60);
   car.speed = THREE.MathUtils.clamp(car.speed, -8.5, 23.5);
   if (handbrake) car.speed *= Math.pow(0.95, dt * 60);
-  car.yaw += steer * Math.sign(car.speed || 1) * Math.min(Math.abs(car.speed) / 5, 1) * 1.95 * dt;
+  const steeringAuthority = Math.min(Math.abs(car.speed) / 6, 1);
+  car.yaw += steer * Math.sign(car.speed || 1) * steeringAuthority * 1.35 * dt;
   const nx = car.x + Math.sin(car.yaw) * car.speed * dt;
   const nz = car.z + Math.cos(car.yaw) * car.speed * dt;
   if (collides(nx, nz, 1.05)) {
@@ -639,7 +651,11 @@ function updateMarker() {
 
 function updateCamera(dt) {
   const focus = focusObject();
-  const yaw = focus.yaw + state.camOrbit;
+  if (!state.driving && !state.walkingInputActive && !state.cameraManualLook) {
+    const yawDelta = Math.atan2(Math.sin(player.yaw - state.camYaw), Math.cos(player.yaw - state.camYaw));
+    state.camYaw += yawDelta * (1 - Math.exp(-dt * 5.5));
+  }
+  const yaw = state.driving ? focus.yaw + state.camOrbit : state.camYaw;
   const distance = state.camDistance;
   const horizontal = Math.cos(state.camPitch) * distance;
   const target = new THREE.Vector3(focus.x, state.driving ? 1.45 : 1.65, focus.z);
@@ -717,7 +733,8 @@ canvas.addEventListener('pointerdown', (event) => {
 canvas.addEventListener('pointermove', (event) => {
   if (!pointer || pointer.id !== event.pointerId) return;
   const dx = event.clientX - pointer.x, dy = event.clientY - pointer.y;
-  state.camOrbit -= dx * 0.007;
+  if (state.driving) state.camOrbit -= dx * 0.007;
+  else { state.camYaw -= dx * 0.007; state.cameraManualLook = true; }
   state.camPitch = THREE.MathUtils.clamp(state.camPitch + dy * 0.0035, 0.22, 0.86);
   pointer.x = event.clientX; pointer.y = event.clientY;
 });
