@@ -5,7 +5,7 @@ const stage = document.querySelector('#stage');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.7));
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.15;
@@ -14,7 +14,8 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color('#eea18d');
 scene.fog = new THREE.FogExp2('#eea18d', 0.0085);
 const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 230);
-const clock = new THREE.Clock();
+const timer = new THREE.Timer();
+timer.connect(document);
 const ROAD = 6.8;
 const roadX = [-48, -24, 0, 24, 48];
 const roadZ = [-36, -12, 12, 36, 60];
@@ -392,7 +393,7 @@ function addVehicle(x, z, yaw, options = {}) {
 }
 
 // The first car is always within a few steps of the opening character.
-const starterCar = addVehicle(-48, -35.8, 0, { parked: true, color: '#e9b64f' });
+addVehicle(-50.4, -32.0, 0, { parked: true, color: '#e9b64f' });
 for (let i = 0; i < 9; i++) {
   const vertical = i % 2 === 0;
   if (vertical) {
@@ -738,7 +739,8 @@ window.addEventListener('blur', () => keys.clear());
 document.querySelector('#restart').addEventListener('click', () => window.location.reload());
 
 function animate() {
-  const dt = Math.min(clock.getDelta(), 0.04);
+  timer.update();
+  const dt = Math.min(timer.getDelta(), 0.04);
   updateWorld(dt);
   updateMarker();
   updateCamera(dt);
