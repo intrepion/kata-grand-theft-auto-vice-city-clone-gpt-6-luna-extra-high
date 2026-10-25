@@ -1,5 +1,9 @@
 # Neon Run — South Beach, 1986
 
+## Play online
+
+[Play Neon Run](https://intrepion.github.io/kata-grand-theft-auto-vice-city-clone-gpt-6-luna-extra-high/) — free, playable in your browser.
+
 A small, original third-person 3D open-world driving game: walk a pastel coastal city, borrow traffic cars, run courier jobs, and shake a police tail.
 
 ## Play
