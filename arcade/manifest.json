@@ -1,6 +1,47 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "gameId": "kata-grand-theft-auto-vice-city-clone-gpt-6-luna-extra-high",
   "playUrl": "https://intrepion.github.io/kata-grand-theft-auto-vice-city-clone-gpt-6-luna-extra-high/",
-  "screenshots": []
+  "screenshots": [
+    {
+      "path": "arcade/screenshots/ci-20261102-01.jpg",
+      "sha256": "265b065284830e4d705d3b030fdf94ef3eac9b00a89117a5edfbe57a8ec97644",
+      "alt": "Neon Run gameplay, view 1",
+      "provenance": {
+        "kind": "ci_gameplay_capture",
+        "sourcePath": "arcade/capture-evidence/ci-20261102-01.png",
+        "sourceSha256": "0ed46bf9681de2c09bd97f8e072a37b0ae2a5e10ca1fff99cab468e4001b07b1",
+        "captureCommit": "4e2af220fe0f189f7893e93d9c0f5e99bedcaf01",
+        "workflowRunId": "41397865654",
+        "inputHashes": {
+          "index.html": "ee3c99fb77e5354ea9bb711c8b43c0d986a33e214b78045b951b5bbb798572fc",
+          "style.css": "6a760dd03dca0df36e2d6d44ee55899c00334a96fbc1d68fa8eae4590dd310b8",
+          "game.bundle.js": "bb4dfc574468e2cbe13f63fb55edf4f26d0c86c30bf12e4b7f944dab2bd9ac38"
+        },
+        "publishedFilesVerifiedAt": "2026-11-02T19:01:20Z",
+        "captureRecordPath": "arcade/capture-evidence/ci-20261102-record.json",
+        "captureRecordSha256": "b995a04f134a193839aac23b128adf2411e1130ad4d363fb9c84931be27ced0a"
+      }
+    },
+    {
+      "path": "arcade/screenshots/ci-20261102-02.jpg",
+      "sha256": "bbcb1ffd9689eed2472dc9914ca16ea8b9b4e176c895d9e13fa80f0673b7fc5d",
+      "alt": "Neon Run gameplay, view 2",
+      "provenance": {
+        "kind": "ci_gameplay_capture",
+        "sourcePath": "arcade/capture-evidence/ci-20261102-02.png",
+        "sourceSha256": "afd8a8da512e8aa6492bd70ea105fe102707aab1637d073a5e0079920ea309b8",
+        "captureCommit": "4e2af220fe0f189f7893e93d9c0f5e99bedcaf01",
+        "workflowRunId": "41397865654",
+        "inputHashes": {
+          "index.html": "ee3c99fb77e5354ea9bb711c8b43c0d986a33e214b78045b951b5bbb798572fc",
+          "style.css": "6a760dd03dca0df36e2d6d44ee55899c00334a96fbc1d68fa8eae4590dd310b8",
+          "game.bundle.js": "bb4dfc574468e2cbe13f63fb55edf4f26d0c86c30bf12e4b7f944dab2bd9ac38"
+        },
+        "publishedFilesVerifiedAt": "2026-11-02T19:01:20Z",
+        "captureRecordPath": "arcade/capture-evidence/ci-20261102-record.json",
+        "captureRecordSha256": "b995a04f134a193839aac23b128adf2411e1130ad4d363fb9c84931be27ced0a"
+      }
+    }
+  ]
 }

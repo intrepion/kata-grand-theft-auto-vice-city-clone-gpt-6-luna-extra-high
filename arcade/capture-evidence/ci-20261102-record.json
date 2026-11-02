@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "workflowCommit": "f9810894709e5444d658acb5473dfea06020c0e0",
+  "sourceCommit": "4e2af220fe0f189f7893e93d9c0f5e99bedcaf01",
+  "runId": "41397865654",
+  "url": "http://127.0.0.1:4207/",
+  "inputs": {
+    "index.html": "ee3c99fb77e5354ea9bb711c8b43c0d986a33e214b78045b951b5bbb798572fc",
+    "style.css": "6a760dd03dca0df36e2d6d44ee55899c00334a96fbc1d68fa8eae4590dd310b8",
+    "game.bundle.js": "bb4dfc574468e2cbe13f63fb55edf4f26d0c86c30bf12e4b7f944dab2bd9ac38"
+  },
+  "browser": "153.0.8010.12",
+  "viewport": {
+    "width": 1280,
+    "height": 1000
+  },
+  "externalFonts": "blocked; system fallback",
+  "screenshots": [
+    "neon-run-01.png",
+    "neon-run-02.png"
+  ]
+}
