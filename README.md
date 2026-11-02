@@ -30,3 +30,7 @@ Open the local URL Vite prints. To create a static production build, run `npm ru
 Find the pink beacon, collect the envelope, and deliver it to the next neighborhood for cash. Crashing at speed draws police attention. Break line of sight and keep moving until your heat fades.
 
 The city, character, and vehicle models are built from original Three.js geometry. There are no bundled image assets; optional Google Fonts fall back to system fonts when unavailable.
+
+## Arcade metadata
+
+See [docs/arcade-metadata.md](docs/arcade-metadata.md) for the game-owned manifest and screenshot provenance.
