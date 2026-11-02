@@ -28,7 +28,7 @@ jobs:
         env:
           CAPTURE_OUTPUT: capture-output
         run: |
-          export GAME_SOURCE_COMMIT="$(git rev-parse HEAD^)"
+          export GAME_SOURCE_COMMIT="4e2af220fe0f189f7893e93d9c0f5e99bedcaf01"
           python3 -m http.server 4207 --bind 127.0.0.1 --directory capture-site > /tmp/neon-run-http.log 2>&1 &
           server_pid=$!
           trap 'kill "$server_pid"' EXIT
